@@ -11,6 +11,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <algorithm>
+#include <stack>
 
 // #include "astar.h"
 
@@ -28,7 +29,6 @@
 
 using namespace std;
 
-
 // struct to store robot state info
 struct State {
     int x; // x pos
@@ -36,12 +36,15 @@ struct State {
     int t; // time
 
     bool operator==(const State& other) const {
+        // return x == other.x && y == other.y;
         return x == other.x && y == other.y && t == other.t;
     }
     bool operator!=(const State& other) const {
+        // return x != other.x && y != other.y;
         return x != other.x && y != other.y && t != other.t;
     }
     bool operator<(const State& other) const {
+        // return x < other.x && y < other.y;
         return x < other.x && y < other.y && t < other.t;
     }
 };
@@ -49,6 +52,7 @@ struct State {
 // hash function for the State struct
 struct StateHash {
     size_t operator()(const State& s) const {
+        // return hash<int>()(s.x) ^ hash<int>()(s.y);
         return hash<int>()(s.x) ^ hash<int>()(s.y) ^ hash<int>()(s.t);
     }
 };
@@ -68,11 +72,21 @@ double getDistance(const State& s1, const State& s2){
     int dy = s1.y - s2.y;
     int dt = s1.t - s2.t;
     return sqrt(dx * dx + dy * dy + dt * dt);
+    // return sqrt(dx * dx + dy * dy);
+
 }
+
+
+// custom comparison function for min-heap
+struct compareSmaller {
+    bool operator()(const std::pair<double, State>& a, const std::pair<double, State>& b) const {
+        return a.first > b.first;
+    }
+};
 
 // actual A* search algorithm
 unordered_map<State, State, StateHash> astar(
-    priority_queue<pair<double, State>> open_list,
+    std::priority_queue<std::pair<double, State>, std::vector<std::pair<double, State>>, compareSmaller> open_list,
     unordered_set<State, StateHash> closed_list,
     unordered_map<State, State, StateHash> parent_list,
     unordered_map<State, double, StateHash> g_values,
@@ -99,6 +113,7 @@ unordered_map<State, State, StateHash> astar(
 
         // remove s with the smallest f from open_list and add to closed
         State s = open_list.top().second;
+        open_list.pop();
         closed_list.insert(s);
 
         // get all potential s' values
@@ -122,10 +137,10 @@ unordered_map<State, State, StateHash> astar(
                     if ( closed_list.count(s_prime) <= 0){
 
                         // if g(s') > g(s)
-                        if ( g_values.count(s_prime) <=0 || g_values[s_prime] > g_values[s] ){
+                        if ( g_values.count(s_prime) <=0 || g_values[s_prime] > g_values[s] + cost ){
                             g_values[s_prime] = g_values[s] + cost; // g(s') = g(s) + c(s,s')
                             parent_list[s_prime] = s;               // update parent list
-                            f_values[s_prime] = g_values[s_prime] + getDistance(s, s_prime);  // update f(s') -- using euclidean dist as h
+                            f_values[s_prime] = g_values[s_prime] + 1.5*getDistance(s, s_prime);  // update f(s') -- using euclidean dist as h
                             open_list.push(make_pair(f_values[s_prime],s_prime)); // insert s into open list
                         }
                     }
@@ -133,35 +148,34 @@ unordered_map<State, State, StateHash> astar(
             }
         }
     }
-
+    cout << "returning parent list" << endl;
     return parent_list;
 }
 
 // backtrack to get the complete path
-vector<State> backtrack(State goal, State start, unordered_map<State, State, StateHash> parent_list){
+stack<State> backtrack(State goal, State start, unordered_map<State, State, StateHash> parent_list){
 
     cout << "backtracking to compute path" << endl;
 
     // make a path of States
-    vector<State> path;
+    stack<State> path;
     State current = goal;
 
     // reconstruct the path
-    while (current != start) {
-        path.push_back(current);
+    while (current.x != start.x || current.y != start.y) {
+        path.push(current);
         current = parent_list[current];
     }
 
-    // reverse so start state is at the beginning
-    reverse(path.begin(), path.end());
     return path;
 }
 
 // initializing the search, call astar algorithm, and backtrack to get path
-vector<State> getPath(State start, State goal, int* map,int x_size,int y_size,int collision_thresh){
+stack<State> getPath(State start, State goal, int* map,int x_size,int y_size,int collision_thresh){
 
     // initialize lists
-    priority_queue<pair<double, State>> open_list; // pair: f(s), s
+    std::priority_queue<std::pair<double, State>, std::vector<std::pair<double, State>>, compareSmaller> open_list; // pair: f(s), s
+    // priority_queue<pair<double, State>> open_list; // pair: f(s), s
     unordered_set<State, StateHash> closed_list;
     unordered_map<State, State, StateHash> parent_list; // maps s'->s
     unordered_map<State, double, StateHash> g_values;
@@ -175,6 +189,8 @@ vector<State> getPath(State start, State goal, int* map,int x_size,int y_size,in
 
     // call A* algorithm
     parent_list = astar(open_list,closed_list,parent_list,g_values,f_values,start,goal,map,x_size,y_size,collision_thresh);
+    cout << "finished running A*" << endl;
+    cout << "parent list size: " << parent_list.size() << endl;
     return backtrack(goal, start, parent_list);
 }
 
@@ -195,6 +211,10 @@ void getNextMove(const vector<State>& path, const State& current, int* action_pt
     }
 }
 
+stack<State> path;
+State start;
+bool first_run = true;
+
 // main planner function that gets called
 void planner(
     int* map,
@@ -211,21 +231,42 @@ void planner(
     int* action_ptr
     )
 {
-    // set start state
-    State start;
-    start.x, start.y, start.t = robotposeX, robotposeY, curr_time;
-    cout << "Start state - x: " << start.x << ", y: " << start.y << ", t: " << start.t << endl;
+    if (first_run){
+        // set start state
+        start.x = robotposeX;
+        start.y = robotposeY;
+        // start.t = curr_time;
+        // cout << "Start state - x: " << start.x << ", y: " << start.y << ", t: " << start.t << endl;
+        cout << "Start state - x: " << start.x << ", y: " << start.y << endl;
 
-    // set goal state
-    State goal = getTargetGoal(target_traj, target_steps);
-    cout << "Goal state - x: " << goal.x << ", y: " << goal.y << ", t: " << goal.t << endl;
+        // set goal state
+        State goal = getTargetGoal(target_traj, target_steps);
+        // cout << "Goal state - x: " << goal.x << ", y: " << goal.y << ", t: " << goal.t << endl;
+        cout << "Goal state - x: " << goal.x << ", y: " << goal.y << endl;
 
-    // get computed path
-    vector<State> path = getPath(start, goal, map, x_size, y_size, collision_thresh);
-    cout << "Computed a path!" << endl;
+        // get computed path
+        path = getPath(start, goal, map, x_size, y_size, collision_thresh);
+        cout << "Computed a path of size: " << path.size() << endl;
 
-    // set action_ptr to next move
-    getNextMove(path, start, action_ptr);
+        first_run = false;
+    }
+
+    if (!path.empty()) {
+        // Find the next state in the path
+
+        action_ptr[0] = path.top().x;
+        action_ptr[1] = path.top().y;
+        path.pop();
+
+        // cout << "x pos: " << action_ptr[0] << endl;
+        // cout << "y pos: " << action_ptr[1] << endl;
+
+    }
+    else{
+        // don't move if there's no path
+        action_ptr[0] = robotposeX;
+        action_ptr[1] = robotposeY;
+    }
 
     return;
 }
