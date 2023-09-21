@@ -70,7 +70,7 @@ if __name__ == "__main__":
         t = robot_trajectory[frame+1]['t']
         line2.set_data([p['x'] for p in target_trajectory[:t]], [p['y'] for p in target_trajectory[:t]])
         
-        plt.pause((robot_trajectory[frame+1]['t']-robot_trajectory[frame]['t'])/SPEEDUP)
+        # plt.pause((robot_trajectory[frame+1]['t']-robot_trajectory[frame]['t'])/SPEEDUP)
         
         return line1, line2
     

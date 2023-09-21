@@ -33,27 +33,27 @@ using namespace std;
 struct State {
     int x; // x pos
     int y; // y pos
-    int t; // time
+    // int t; // time
 
     bool operator==(const State& other) const {
-        // return x == other.x && y == other.y;
-        return x == other.x && y == other.y && t == other.t;
+        return x == other.x && y == other.y;
+        // return x == other.x && y == other.y && t == other.t;
     }
     bool operator!=(const State& other) const {
-        // return x != other.x && y != other.y;
-        return x != other.x && y != other.y && t != other.t;
+        return x != other.x && y != other.y;
+        // return x != other.x && y != other.y && t != other.t;
     }
     bool operator<(const State& other) const {
-        // return x < other.x && y < other.y;
-        return x < other.x && y < other.y && t < other.t;
+        return x < other.x && y < other.y;
+        // return x < other.x && y < other.y && t < other.t;
     }
 };
 
 // hash function for the State struct
 struct StateHash {
     size_t operator()(const State& s) const {
-        // return hash<int>()(s.x) ^ hash<int>()(s.y);
-        return hash<int>()(s.x) ^ hash<int>()(s.y) ^ hash<int>()(s.t);
+        return hash<int>()(s.x) ^ hash<int>()(s.y);
+        // return hash<int>()(s.x) ^ hash<int>()(s.y) ^ hash<int>()(s.t);
     }
 };
 
@@ -62,7 +62,7 @@ State getTargetGoal(int* target_traj, int target_steps){
     State goal;
     goal.x = target_traj[target_steps-1];
     goal.y = target_traj[target_steps-1+target_steps];
-    goal.t = target_steps;
+    // goal.t = target_steps;
     return goal;
 }
 
@@ -70,12 +70,20 @@ State getTargetGoal(int* target_traj, int target_steps){
 double getDistance(const State& s1, const State& s2){
     int dx = s1.x - s2.x;
     int dy = s1.y - s2.y;
-    int dt = s1.t - s2.t;
-    return sqrt(dx * dx + dy * dy + dt * dt);
-    // return sqrt(dx * dx + dy * dy);
-
+    // int dt = s1.t - s2.t;
+    return sqrt(dx * dx + dy * dy);
+    // return sqrt(dx * dx + dy * dy + dt * dt);
 }
 
+// diagonal distance (heuristic)
+double getDiagDist(const State& s1, const State& s2){
+    int dx = abs(s1.x - s2.x);
+    int dy = abs(s1.y - s2.y);
+    // int dt = s1.t - s2.t;
+    return dx + dy + (sqrt(2)-2) * min(dx,dy);
+    // return sqrt(dx * dx + dy * dy + dt * dt);
+    
+}
 
 // custom comparison function for min-heap
 struct compareSmaller {
@@ -90,7 +98,6 @@ unordered_map<State, State, StateHash> astar(
     unordered_set<State, StateHash> closed_list,
     unordered_map<State, State, StateHash> parent_list,
     unordered_map<State, double, StateHash> g_values,
-    unordered_map<State, double, StateHash> f_values,
     State start,
     State goal,
     int* map,
@@ -106,8 +113,7 @@ unordered_map<State, State, StateHash> astar(
     int dY[NUMOFDIRS] = {-1,  0,  1, -1,  1, -1, 0, 1};
 
     // while s_goal not expanded and open list not empty
-    while( !open_list.empty() && closed_list.find(goal)==closed_list.end() ){
-
+    while( !open_list.empty() && closed_list.count(goal)<=0 ){
         // cout << "open list size: " << open_list.size() << endl;
         // cout << "closed list size: " << closed_list.size() << endl;
 
@@ -122,16 +128,16 @@ unordered_map<State, State, StateHash> astar(
         {
             s_prime.x = s.x + dX[dir];
             s_prime.y = s.y + dY[dir];
-            s_prime.t = s.t + 1;
+            // s_prime.t = s.t + 1;
 
             // check size of s'
             if (s_prime.x >= 1 && s_prime.x <= x_size && s_prime.y >= 1 && s_prime.y <= y_size)
             {
                 // get cost of moving to s'
-                int cost = map[GETMAPINDEX(s_prime.x,s_prime.y,x_size,y_size)];  
+                int cost = map[GETMAPINDEX(s_prime.x,s_prime.y,x_size,y_size)];
 
                 // check if free to move to
-                if ((cost >= 0) && (cost < collision_thresh))  
+                if ((cost >= 0) && (cost < collision_thresh))
                 {
                     // check that s' not in closed_list 
                     if ( closed_list.count(s_prime) <= 0){
@@ -140,8 +146,8 @@ unordered_map<State, State, StateHash> astar(
                         if ( g_values.count(s_prime) <=0 || g_values[s_prime] > g_values[s] + cost ){
                             g_values[s_prime] = g_values[s] + cost; // g(s') = g(s) + c(s,s')
                             parent_list[s_prime] = s;               // update parent list
-                            f_values[s_prime] = g_values[s_prime] + 1.5*getDistance(s, s_prime);  // update f(s') -- using euclidean dist as h
-                            open_list.push(make_pair(f_values[s_prime],s_prime)); // insert s into open list
+                            open_list.push(make_pair(g_values[s_prime] + getDiagDist(s_prime, goal), s_prime)); // insert s into open list
+                            // open_list.push(make_pair(g_values[s_prime], s_prime)); // insert s into open list
                         }
                     }
                 }
@@ -170,45 +176,27 @@ stack<State> backtrack(State goal, State start, unordered_map<State, State, Stat
     return path;
 }
 
+
 // initializing the search, call astar algorithm, and backtrack to get path
 stack<State> getPath(State start, State goal, int* map,int x_size,int y_size,int collision_thresh){
 
     // initialize lists
     std::priority_queue<std::pair<double, State>, std::vector<std::pair<double, State>>, compareSmaller> open_list; // pair: f(s), s
-    // priority_queue<pair<double, State>> open_list; // pair: f(s), s
     unordered_set<State, StateHash> closed_list;
     unordered_map<State, State, StateHash> parent_list; // maps s'->s
     unordered_map<State, double, StateHash> g_values;
-    unordered_map<State, double, StateHash> f_values;
 
     // initialize start conditions
     g_values[start] = 0;
-    f_values[start] = g_values[start];
-    open_list.push(make_pair(f_values[start],start));
+    open_list.push(make_pair(g_values[start] + getDiagDist(start, goal), start));
     cout << "initialized starting values" << endl;
 
     // call A* algorithm
-    parent_list = astar(open_list,closed_list,parent_list,g_values,f_values,start,goal,map,x_size,y_size,collision_thresh);
+    parent_list = astar(open_list,closed_list,parent_list,g_values,start,goal,map,x_size,y_size,collision_thresh);
     cout << "finished running A*" << endl;
     cout << "parent list size: " << parent_list.size() << endl;
     return backtrack(goal, start, parent_list);
-}
 
-// compute the next move in x and y
-void getNextMove(const vector<State>& path, const State& current, int* action_ptr){
-    if (path.size() < 1) {
-        // No path or already at the goal
-        action_ptr[0] = current.x;
-        action_ptr[1] = current.y;
-    }
-
-    // Find the next state in the path
-    for (size_t i = 0; i < path.size() - 1; i++) {
-        if (path[i] == current) {
-            action_ptr[0] = path[i + 1].x - current.x;
-            action_ptr[1] = path[i + 1].y - current.y;
-        }
-    }
 }
 
 stack<State> path;
@@ -251,13 +239,12 @@ void planner(
         first_run = false;
     }
 
+    // send the next state
     if (!path.empty()) {
         // Find the next state in the path
-
         action_ptr[0] = path.top().x;
         action_ptr[1] = path.top().y;
         path.pop();
-
         // cout << "x pos: " << action_ptr[0] << endl;
         // cout << "y pos: " << action_ptr[1] << endl;
 

@@ -1,0 +1,66 @@
+// {
+//     // Use IntelliSense to learn about possible attributes.
+//     // Hover to view descriptions of existing attributes.
+//     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+//     "version": "0.2.0",
+//     "configurations": [
+//         {
+//             "name": "Debug",
+//             "type": "gdb",
+//             "request": "launch",
+//             "target": "./a.out",
+//             "cwd": "${workspaceRoot}",
+//             "valuesFormatting": "parseText",
+//             "arguments": "map7.txt"
+//         }
+//     ]
+// }
+
+{
+"version": "0.2.0",
+"configurations": [
+        {
+            "name": "(gdb) Launch",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/myprogram",
+            "args": ["map5.txt"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            // "externalConsole": true,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+    ]
+}
+
+// another option!!!
+
+// {
+//     // for Linux
+//     "name": "(gdb) Launch cunit",
+//     "type": "gdb",
+//     "request": "launch",
+//     "program": "${workspaceRoot}/a.out", // change ?
+//     "args": ["map7.txt"], // i think you set these args up incorrectly. look up the format for them
+//     "stopAtEntry": false,
+//     "cwd": "${workspaceRoot}",
+//     "environment": [], // change?
+//     "externalConsole": true,
+//     "MIMode": "gdb",
+//     // "preLaunchTask": "build cunit", // change?
+//     "setupCommands": [
+//       {
+//         "description": "Enable pretty-printing for gdb",
+//         "text": "-enable-pretty-printing",
+//         "ignoreFailures": true
+//       }
+//     ]
+//   }
