@@ -4,9 +4,9 @@
         {
             "label": "build C++",
             "type": "shell",
-            "command": "g++",  // Replace with your compiler command (e.g., clang++ for LLVM)
+            "command": "g++",    // Replace with your compiler command (e.g., clang++ for LLVM)
             "args": [
-                "-g",           // Generate debugging information
+                "-g",            // Generate debugging information
                 "-o",
                 "${workspaceRoot}/myprogram",   // Output executable name
                 "${workspaceRoot}/runtest.cpp",   // Input source code file(s)

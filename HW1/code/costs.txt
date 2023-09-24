@@ -1,4 +1,4 @@
-V1 costs
+2D basic costs:
 map1 - 5344
 map2 - 9710922
 map3 - 791
@@ -9,18 +9,17 @@ map7 - 0
 map8 - 0 NO
 map9 - 0
 
-V3 multigoal costs
+2D multigoal costs:
 map1 - 5344
-map2 - 9716034
-map3 - 791
-map4 - 70271
-map5 - 181 NO
+map2 - NO
+map3 - NO
+map4 - 672
+map5 - NO
 map6 - 2800
 map7 - 0
-map8 - 0 NO
+map8 - NO
 map9 - 0
 
-
-V3 3D costs
+V3 3D costs:
 map 6 - 2439
 map 9 - 0
