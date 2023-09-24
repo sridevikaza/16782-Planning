@@ -14,7 +14,6 @@
 #include <stack>
 #include <chrono>
 
-// #include "astar.h"
 
 #define GETMAPINDEX(X, Y, XSIZE, YSIZE) ((Y-1)*XSIZE + (X-1))
 
@@ -34,22 +33,27 @@ using namespace std;
 struct State {
     int x; // x pos
     int y; // y pos
+    int t; // time
 
     bool operator==(const State& other) const {
-        return x == other.x && y == other.y;
+        // return x == other.x && y == other.y;
+        return x == other.x && y == other.y && t == other.t;
     }
     bool operator!=(const State& other) const {
-        return x != other.x && y != other.y;
+        // return x != other.x || y != other.y;
+        return x != other.x || y != other.y || t !=other.t;
     }
     bool operator<(const State& other) const {
-        return x < other.x && y < other.y;
+        // return x < other.x && y < other.y;
+        return x < other.x && y < other.y && t < other.t;
     }
 };
 
 // hash function for the State struct
 struct StateHash {
     size_t operator()(const State& s) const {
-        return hash<int>()(s.x) ^ hash<int>()(s.y);
+        // return hash<int>()(s.x) ^ hash<int>()(s.y);
+        return hash<int>()(s.x) ^ hash<int>()(s.y) ^ hash<int>()(s.t);
     }
 };
 
@@ -58,6 +62,7 @@ State getTargetGoal(int* target_traj, int target_steps){
     State goal;
     goal.x = target_traj[target_steps-1];
     goal.y = target_traj[target_steps-1+target_steps];
+    goal.t = target_steps;
     return goal;
 }
 
@@ -65,14 +70,9 @@ State getTargetGoal(int* target_traj, int target_steps){
 double getDistance(const State& s1, const State& s2){
     int dx = s1.x - s2.x;
     int dy = s1.y - s2.y;
-    return sqrt(dx * dx + dy * dy);
-}
-
-// diagonal distance (heuristic)
-double getDiagDist(const State& s1, const State& s2){
-    int dx = abs(s1.x - s2.x);
-    int dy = abs(s1.y - s2.y);
-    return dx + dy + (sqrt(2)-2) * min(dx,dy);    
+    int dt = s1.t - s2.t;
+    // return sqrt(dx*dx + dy*dy);
+    return sqrt(dx*dx + dy*dy + dt*dt);
 }
 
 // custom comparison function for min-heap
@@ -82,6 +82,19 @@ struct compareSmaller {
     }
 };
 
+bool onTrajectory(int* target_traj, int target_steps, State s){
+    for (int i=1; i<=target_steps; i++){
+        int x = target_traj[target_steps-1];
+        int y = target_traj[target_steps-1+target_steps];
+        if (s.x == x && s.y == y && s.t == target_steps){
+        // if (s.x == x && s.y == y){
+            cout << "on target trajectory!!" << endl;
+            return true;
+        }
+    }
+    return false;
+}
+
 //  A* search algorithm
 unordered_map<State, State, StateHash> astar(
     State start,
@@ -89,7 +102,9 @@ unordered_map<State, State, StateHash> astar(
     int* map,
     int x_size,
     int y_size,
-    int collision_thresh
+    int collision_thresh,
+    int* target_traj,
+    int target_steps
     )
 {
     cout << "running A* search" << endl;
@@ -102,21 +117,26 @@ unordered_map<State, State, StateHash> astar(
 
     // initialize start conditions
     g_values[start] = 0;
-    // open_list.push(make_pair(g_values[start], start));
-    open_list.push(make_pair(g_values[start] + getDistance(start, goal), start));
+    open_list.push(make_pair(g_values[start] + 15*getDistance(start, goal), start)); // todo: may need to change this heuristic since we arent planning to the end anymore
+    // open_list.push(make_pair(g_values[start] + getDistance(start, goal), start)); // todo: may need to change this heuristic since we arent planning to the end anymore
     cout << "initialized starting values" << endl;
 
     // 8-connected grid
     int dX[NUMOFDIRS] = {-1, -1, -1,  0,  0,  1, 1, 1};
     int dY[NUMOFDIRS] = {-1,  0,  1, -1,  1, -1, 0, 1};
 
+    State s = start;
+
     // while s_goal not expanded and open list not empty
+    // while( !open_list.empty() && closed_list.count(goal)<=0 ){
     while( !open_list.empty() && closed_list.count(goal)<=0 ){
+    // while( !open_list.empty() && !onTrajectory( target_traj, target_steps, s) ){
+
         // cout << "open list size: " << open_list.size() << endl;
         // cout << "closed list size: " << closed_list.size() << endl;
 
         // remove s with the smallest f from open_list and add to closed
-        State s = open_list.top().second;
+        s = open_list.top().second;
         open_list.pop();
         closed_list.insert(s);
 
@@ -126,6 +146,7 @@ unordered_map<State, State, StateHash> astar(
         {
             s_prime.x = s.x + dX[dir];
             s_prime.y = s.y + dY[dir];
+            s_prime.t = s.t + 1;
 
             // check size of s'
             if (s_prime.x >= 1 && s_prime.x <= x_size && s_prime.y >= 1 && s_prime.y <= y_size)
@@ -143,8 +164,7 @@ unordered_map<State, State, StateHash> astar(
                         if ( g_values.count(s_prime) <=0 || g_values[s_prime] > g_values[s] + cost ){
                             g_values[s_prime] = g_values[s] + cost; // g(s') = g(s) + c(s,s')
                             parent_list[s_prime] = s;               // update parent list
-                            open_list.push(make_pair(g_values[s_prime] + getDistance(s_prime, goal), s_prime)); // insert s into open list
-                            // open_list.push(make_pair(g_values[s_prime], s_prime)); // insert s into open list
+                            open_list.push(make_pair(g_values[s_prime] + 15*getDistance(s_prime, goal), s_prime)); // insert s into open list
                         }
                     }
                 }
@@ -165,7 +185,8 @@ stack<State> backtrack(const State& goal, const State& start, unordered_map<Stat
     State current = goal;
 
     // reconstruct the path
-    while (current.x != start.x || current.y != start.y) {
+    while (current.x != start.x || current.y != start.y || current.t != start.t) {
+    // while (current.x != start.x || current.y != start.y) {
         path.push(current);
         current = parent_list[current];
     }
@@ -193,21 +214,27 @@ void planner(
     int* action_ptr
     )
 {
+
+    // cout << " RUNNING PLANNER V3" << endl;
+
     if (first_run){
         // set start state
         start.x = robotposeX;
         start.y = robotposeY;
-        cout << "Start state - x: " << start.x << ", y: " << start.y << endl;
+        start.t = 1+100;
+        cout << "Start state - x: " << start.x << ", y: " << start.y << ", t: " << start.t << endl;
+        // cout << "Start state - x: " << start.x << ", y: " << start.y << endl;
 
         // set goal state
         State goal = getTargetGoal(target_traj, target_steps);
-        cout << "Goal state - x: " << goal.x << ", y: " << goal.y << endl;
+        // cout << "Goal state - x: " << goal.x << ", y: " << goal.y << endl;
+        cout << "Goal state - x: " << goal.x << ", y: " << goal.y << ", t: " << goal.t << endl;
 
         // start clock
         auto start_time = chrono::high_resolution_clock::now();
 
         // get computed path
-        unordered_map<State, State, StateHash> parent_list = astar(start,goal,map,x_size,y_size,collision_thresh);
+        unordered_map<State, State, StateHash> parent_list = astar(start,goal,map,x_size,y_size,collision_thresh,target_traj,target_steps);
         cout << "finished running A*" << endl;
         cout << "parent list size: " << parent_list.size() << endl;
         path = backtrack(goal, start, parent_list);
@@ -229,7 +256,7 @@ void planner(
         action_ptr[1] = path.top().y;
         path.pop();
     }
-    else{
+    else {
         // don't move if there's no path
         action_ptr[0] = robotposeX;
         action_ptr[1] = robotposeY;

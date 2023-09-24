@@ -10,7 +10,7 @@
                 "-o",
                 "${workspaceRoot}/myprogram",   // Output executable name
                 "${workspaceRoot}/runtest.cpp",   // Input source code file(s)
-                "${workspaceRoot}/plannerv2.cpp"   // Input source code file(s)
+                "${workspaceRoot}/plannerv3.cpp"   // Input source code file(s)
             ],
             "group": {
                 "kind": "build",

@@ -72,33 +72,41 @@ tuple<vector<int>, vector<int>> astar( //todo make return a ptr
     // initialize data structures
     unique_ptr<vector<int>> xmoves = make_unique<vector<int>>();
     unique_ptr<vector<int>> ymoves = make_unique<vector<int>>();
-    unique_ptr<vector<int>> g_vals = make_unique<vector<int>>(x_size*y_size, 1000000);     // g values // todo: maybe use a deque
+    unique_ptr<vector<int>> g_vals = make_unique<vector<int>>(x_size*y_size, INFINITY);     // g values // todo: maybe use a deque
     unique_ptr<vector<bool>> closed_list = make_unique<vector<bool>>(x_size*y_size);        // closed list
     priority_queue<pair<double, int>, vector<pair<double, int>>, compareSmaller> open_list; // open list // todo: use a unique ptr and possibly make vector
 
     // initialize start conditions
     int x = xstart;
     int y = ystart;
-    (*g_vals)[x*y+y] =  0;                      // g start = 0
-    double h = getDistance(x, y, xgoal, ygoal); // euclidean dist heuristic
-    open_list.push(make_pair(h, x*y+y));        // add start to open list
+    (*g_vals)[x_size*(y-1)+x] =  0;               // g start = 0
+    double h = getDistance(x, y, xgoal, ygoal);   // euclidean dist heuristic
+    open_list.push(make_pair(h, x_size*(y-1)+x)); // add start to open list
 
     // 8-connected grid
     int dX[NUMOFDIRS] = {-1, -1, -1,  0,  0,  1, 1, 1};
     int dY[NUMOFDIRS] = {-1,  0,  1, -1,  1, -1, 0, 1};
 
     // while open list not empty and s_goal not expanded
-    while( !open_list.empty() && !(*closed_list)[xgoal*ygoal+ygoal] ){
-
-        // todo: fix indexing
+    while( !open_list.empty() && !(*closed_list)[xgoal*ygoal+xgoal] ){
 
         // cout << "open list size: " << open_list.size() << endl;
         // cout << "closed list size: " << closed_list.size() << endl;
 
-        // add the index of the smallest f value to closed list and remove from open list
+        // add the index of the smallest f value to closed list
         (*closed_list)[open_list.top().second] = true;
-        x = open_list.top().second%
-        y =  //todo: update x and y here
+
+        // get x and y from index
+        if(open_list.top().second % x_size == 0){
+            x = x_size;
+            y = open_list.top().second / x_size;
+        }
+        else{
+            x = open_list.top().second % x_size;
+            y = ceil(open_list.top().second / x_size);
+        }
+        
+        // remove s from open list
         open_list.pop();
 
         // get all potential s' values
@@ -119,19 +127,19 @@ tuple<vector<int>, vector<int>> astar( //todo make return a ptr
                 if ((cost >= 0) && (cost < collision_thresh))
                 {
                     // check that s' not in closed_list 
-                    if ( !(*closed_list)[xprime*yprime+yprime] ){
+                    if ( !(*closed_list)[x_size*(yprime-1)+xprime] ){
 
                         // if g(s') > g(s)
-                        if ( (*g_vals)[xprime*yprime+yprime] > (*g_vals)[x*y+y] + cost ){
-                            (*g_vals)[xprime*yprime+yprime] = (*g_vals)[x*y+y] + cost; // g(s') = g(s) + c(s,s')
+                        if ( (*g_vals)[x_size*(yprime-1)+xprime] > (*g_vals)[x_size*(y-1)+x] + cost ){
+                            (*g_vals)[x_size*(yprime-1)+xprime] = (*g_vals)[x_size*(y-1)+x] + cost; // g(s') = g(s) + c(s,s')
 
                             // save moves
-                            xmoves->push_back(dX[dir]);               
+                            xmoves->push_back(dX[dir]);
                             ymoves->push_back(dY[dir]);
 
                             // update open list
-                            double f = (*g_vals)[xprime*yprime+yprime] + getDistance(x, y, xprime, yprime);
-                            open_list.push(make_pair(f, xprime*yprime+yprime)); // insert s into open list
+                            double f = (*g_vals)[x_size*(yprime-1)+xprime];// + getDistance(x, y, xprime, yprime);
+                            open_list.push(make_pair(f, x_size*(yprime-1)+xprime)); // insert s into open list
 
                         }
                     }
@@ -211,6 +219,8 @@ void planner(
     int* action_ptr
     )
 {
+    cout << "Running Planner V3" << endl;
+
     if (first_run){
 
         cout << "Start state - x: " << robotposeX << ", y: " << robotposeY << endl;
