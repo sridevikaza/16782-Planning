@@ -24,7 +24,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/myprogram",
-            "args": ["map3.txt"],
+            "args": ["map2.txt"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
@@ -40,27 +40,3 @@
         },
     ]
 }
-
-// another option!!!
-
-// {
-//     // for Linux
-//     "name": "(gdb) Launch cunit",
-//     "type": "gdb",
-//     "request": "launch",
-//     "program": "${workspaceRoot}/a.out", // change ?
-//     "args": ["map7.txt"], // i think you set these args up incorrectly. look up the format for them
-//     "stopAtEntry": false,
-//     "cwd": "${workspaceRoot}",
-//     "environment": [], // change?
-//     "externalConsole": true,
-//     "MIMode": "gdb",
-//     // "preLaunchTask": "build cunit", // change?
-//     "setupCommands": [
-//       {
-//         "description": "Enable pretty-printing for gdb",
-//         "text": "-enable-pretty-printing",
-//         "ignoreFailures": true
-//       }
-//     ]
-//   }

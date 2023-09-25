@@ -3,23 +3,31 @@ map1 - 5344
 map2 - 9710922
 map3 - 791
 map4 - 70271
-map5 - 181 NO
+map5 - 
 map6 - 2800
 map7 - 0
-map8 - 0 NO
+map8 - 
 map9 - 0
 
-2D multigoal costs:
-map1 - 5344
-map2 - NO
-map3 - NO
-map4 - 672
+2D multigoal costs (average distance, weight=15):
+map1 - 5317
+map2 - 
+map3 - 461
+map4 - 636
+map5 - 
+map6 - 2800
+map7 - 0
+map8 - 
+map9 - 
+2D multigoal costs (weighted average distance, weight=10/15?):
+
+
+map1 - 5317
+map2 - 5738464
+map3 - 462
+map4 - 637
 map5 - NO
 map6 - 2800
 map7 - 0
 map8 - NO
 map9 - 0
-
-V3 3D costs:
-map 6 - 2439
-map 9 - 0

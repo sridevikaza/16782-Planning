@@ -27,52 +27,42 @@
 
 #define NUMOFDIRS 8
 
-#define START_TIME 100
-
 using namespace std;
 
 // struct to store robot state info
 struct State {
     int x; // x pos
     int y; // y pos
-    // int t; // time
 
     bool operator==(const State& other) const {
         return x == other.x && y == other.y;
-        // return x == other.x && y == other.y && t == other.t;
     }
     bool operator!=(const State& other) const {
         return x != other.x || y != other.y;
-        // return x != other.x || y != other.y || t !=other.t;
     }
     bool operator<(const State& other) const {
         return x < other.x && y < other.y;
-        // return x < other.x && y < other.y && t < other.t;
     }
 };
 
+// global variables
 State chosen_goal;
+stack<State> path;
+State start;
+bool first_run = true;
+chrono::_V2::system_clock::time_point start_time;
+
 
 // hash function for the State struct
 struct StateHash {
     size_t operator()(const State& s) const {
         return hash<int>()(s.x) ^ hash<int>()(s.y);
-        // return hash<int>()(s.x) ^ hash<int>()(s.y) ^ hash<int>()(s.t);
     }
 };
 
-// get the target goal state
-State getTargetGoal(int* target_traj, int target_steps){
-    State goal;
-    goal.x = target_traj[target_steps-1];
-    goal.y = target_traj[target_steps-1+target_steps];
-    // goal.t = target_steps;
-    return goal;
-}
-
 vector<State> getMultiGoal(int* target_traj, int target_steps){
     vector<State> multiGoal;
-    for (int i=START_TIME; i<=target_steps; ++i) {
+    for (int i=0; i<=target_steps; ++i) {
         State goal;
         goal.x = target_traj[i-1];
         goal.y = target_traj[target_steps-1+i];
@@ -82,41 +72,89 @@ vector<State> getMultiGoal(int* target_traj, int target_steps){
     return multiGoal;
 }
 
-
-// distance (heuristic)
-double getDistance(const State& s1, const State& s2){
+// weight * euclidean distance
+double getWeightedDistance(const State& s1, const State& s2, double weight){
     int dx = s1.x - s2.x;
     int dy = s1.y - s2.y;
-    // int dt = s1.t - s2.t;
-    return sqrt(dx*dx + dy*dy);
-    // return dx*dx + dy*dy + dt*dt;
+    return weight * sqrt(dx*dx + dy*dy);
+}
+
+// weighted average distance heuristic
+double getHeuristic(const State& s, const vector<State>& multiGoal, double weight) {
+    double total_distance = 0;
+    int i = 0;
+    for(const auto& goal : multiGoal) {
+        i++;
+        total_distance += getWeightedDistance(s, goal, weight*i/multiGoal.size());
+    }
+    return total_distance / multiGoal.size();
+}
+
+// get the last target state
+State getFinalGoal(int* target_traj, int target_steps){
+    State goal;
+    goal.x = target_traj[target_steps-1];
+    goal.y = target_traj[target_steps-1+target_steps];
+    return goal;
 }
 
 // custom comparison function for min-heap
 struct compareSmaller {
-    bool operator()(const std::pair<double, State>& a, const std::pair<double, State>& b) const {
+    bool operator()(const pair<double, State>& a, const pair<double, State>& b) const {
         return a.first > b.first;
     }
 };
 
-bool onTrajectory(int* target_traj, int target_steps, State s){
-    for (int i=START_TIME; i<=target_steps; ++i) {
+// backtrack to get the complete path
+int getNumMoves(const State& s, const State& start, unordered_map<State, State, StateHash> parent_list){
+    int count = 0;
+    State current = s;
+
+    while (current.x != start.x || current.y != start.y) {
+        current = parent_list[current];
+        count += 1;
+    }
+
+    return count;
+}
+
+// determine if a potential goal state can be reached in time
+bool checkGoal(int wall_clock_t, State s, State last_goal, vector<State> multiGoal, int* target_traj, int target_steps, State start, unordered_map<State, State, StateHash> parent_list){
+    
+    int buffer_time = 0;
+
+    for (int i=wall_clock_t; i<=target_steps; ++i) {
+
         int x = target_traj[i-1];
         int y = target_traj[target_steps-1+i];
-        // if (s.x == x && s.y == y && s.t == target_steps){
-        if (s.x == x && s.y == y){
-            cout << "on target trajectory!!" << endl;
+
+        // if the potential goal id the final goal, just use that
+        if (s.x == last_goal.x && s.y == last_goal.y ){
             return true;
+        }
+
+        if (s.x == x && s.y == y){
+
+            int num_moves = getNumMoves(s, start, parent_list);
+            if ( i > num_moves+wall_clock_t ){
+                // cout << "found a goal" << endl;
+                // cout << "number of moves for robot to reach goal: " << num_moves << endl;
+                // cout << "seconds passed: " << wall_clock_t << endl;
+                // cout << "number of moves for target to be at goal: " << i << endl;
+                return true;
+            }
         }
     }
     return false;
+
 }
 
 //  A* search algorithm
 unordered_map<State, State, StateHash> astar(
-    std::vector<State> multiGoal,
-    State start,
+    int size,
     State goal,
+    vector<State> multiGoal,
+    State start,
     int* map,
     int x_size,
     int y_size,
@@ -128,16 +166,15 @@ unordered_map<State, State, StateHash> astar(
     cout << "running A* search" << endl;
 
     // initialize lists
-    std::priority_queue<std::pair<double, State>, std::vector<std::pair<double, State>>, compareSmaller> open_list; // pair: f(s), s
+    priority_queue<pair<double, State>, vector<pair<double, State>>, compareSmaller> open_list; // pair: f(s), s
     unordered_set<State, StateHash> closed_list;
     unordered_map<State, State, StateHash> parent_list; // maps s'->s
     unordered_map<State, double, StateHash> g_values;
 
     // initialize start conditions
     g_values[start] = 0;
-    open_list.push(make_pair(g_values[start] + 15*getDistance(start, goal), start)); // todo: may need to change this heuristic since we arent planning to the end anymore
-    // open_list.push(make_pair(g_values[start] + getDistance(start, goal), start)); // todo: may need to change this heuristic since we arent planning to the end anymore
-    cout << "initialized starting values" << endl;
+    open_list.push(make_pair(g_values[start] + getHeuristic(start, multiGoal, 15), start)); 
+    // cout << "initialized starting values" << endl;
 
     // 8-connected grid
     int dX[NUMOFDIRS] = {-1, -1, -1,  0,  0,  1, 1, 1};
@@ -145,19 +182,31 @@ unordered_map<State, State, StateHash> astar(
 
     State s = start;
 
-    // while s_goal not expanded and open list not empty
-    // while( !open_list.empty() && closed_list.count(goal)<=0 ){
-    while( !open_list.empty() ){
-    // while( !open_list.empty() && !onTrajectory( target_traj, target_steps, s) ){
+    // get number of seconds passed
+    auto current_time = chrono::high_resolution_clock::now();
+    auto duration = chrono::duration_cast<chrono::seconds>(current_time - start_time);
+    int wall_clock_t = ceil(duration.count());
 
-        // Check if the current state is any of the goals
-        if(find(multiGoal.begin(), multiGoal.end(), s) != multiGoal.end()) {
-            chosen_goal = s;
-            break;  // Exit the loop if we have reached one of the goals
+    // check that open list isn't empty
+    while( !open_list.empty() ){
+
+        // make sure the time limit has not been exceeded
+        if (wall_clock_t>=target_steps){
+            cout << "time exceeded -- no goal found" << endl;
+            parent_list = unordered_map<State, State, StateHash>();
+            break;
         }
 
-        // cout << "open list size: " << open_list.size() << endl;
-        // cout << "closed list size: " << closed_list.size() << endl;
+        // get number of seconds passed
+        current_time = chrono::high_resolution_clock::now();
+        duration = chrono::duration_cast<chrono::seconds>(current_time - start_time);
+        wall_clock_t = ceil(duration.count());
+
+        // check if the goal can be reached in time
+        if (checkGoal(wall_clock_t, s, goal, multiGoal, target_traj, target_steps, start, parent_list)){
+            chosen_goal = s;
+            break;
+        }
 
         // remove s with the smallest f from open_list and add to closed
         s = open_list.top().second;
@@ -170,7 +219,6 @@ unordered_map<State, State, StateHash> astar(
         {
             s_prime.x = s.x + dX[dir];
             s_prime.y = s.y + dY[dir];
-            // s_prime.t = s.t + 1;
 
             // check size of s'
             if (s_prime.x >= 1 && s_prime.x <= x_size && s_prime.y >= 1 && s_prime.y <= y_size)
@@ -188,14 +236,20 @@ unordered_map<State, State, StateHash> astar(
                         if ( g_values.count(s_prime) <=0 || g_values[s_prime] > g_values[s] + cost ){
                             g_values[s_prime] = g_values[s] + cost; // g(s') = g(s) + c(s,s')
                             parent_list[s_prime] = s;               // update parent list
-                            open_list.push(make_pair(g_values[s_prime] + 15*getDistance(s_prime, goal), s_prime)); // insert s into open list
+                            open_list.push(make_pair(g_values[s_prime] + getHeuristic(s_prime, multiGoal, 15), s_prime)); // insert s into open list
                         }
                     }
                 }
             }
         }
     }
-    cout << "returning parent list" << endl;
+
+    cout << "returning parent list" << endl; 
+    // todo: can probs take out
+    // if ( parent_list.size() >= size-1 ){
+    //     cout << "no goal found" << endl;
+    //     return unordered_map<State, State, StateHash>();
+    // }
     return parent_list;
 }
 
@@ -206,10 +260,10 @@ stack<State> backtrack(const State& goal, const State& start, unordered_map<Stat
 
     // make a path of States
     stack<State> path;
+
     State current = goal;
 
     // reconstruct the path
-    // while (current.x != start.x || current.y != start.y || current.t != start.t) {
     while (current.x != start.x || current.y != start.y) {
         path.push(current);
         current = parent_list[current];
@@ -217,10 +271,6 @@ stack<State> backtrack(const State& goal, const State& start, unordered_map<Stat
 
     return path;
 }
-
-stack<State> path;
-State start;
-bool first_run = true;
 
 // main planner function that gets called
 void planner(
@@ -242,33 +292,31 @@ void planner(
     // cout << " RUNNING PLANNER V3" << endl;
 
     if (first_run){
+
+        // start clock
+        start_time = chrono::high_resolution_clock::now();
+
         // set start state
         start.x = robotposeX;
         start.y = robotposeY;
-        // start.t = START_TIME;
-        // cout << "Start state - x: " << start.x << ", y: " << start.y << ", t: " << start.t << endl;
         cout << "Start state - x: " << start.x << ", y: " << start.y << endl;
 
-        // set goal state
-        State goal = getTargetGoal(target_traj, target_steps);
-        std::vector<State> multiGoal = getMultiGoal(target_traj, target_steps);
-        // cout << "Goal state - x: " << goal.x << ", y: " << goal.y << endl;
-        // cout << "Goal state - x: " << goal.x << ", y: " << goal.y << ", t: " << goal.t << endl;
-
-        // start clock
-        auto start_time = chrono::high_resolution_clock::now();
+        // get goal states
+        vector<State> multiGoal = getMultiGoal(target_traj, target_steps);
+        State goal = getFinalGoal(target_traj, target_steps);
+        int size = x_size * y_size;
 
         // get computed path
-        unordered_map<State, State, StateHash> parent_list = astar(multiGoal,start,goal,map,x_size,y_size,collision_thresh,target_traj,target_steps);
+        unordered_map<State, State, StateHash> parent_list = astar(size, goal,multiGoal,start,map,x_size,y_size,collision_thresh,target_traj,target_steps);
         cout << "finished running A*" << endl;
         cout << "parent list size: " << parent_list.size() << endl;
         path = backtrack(chosen_goal, start, parent_list);
 
         // get wall clock computation time
         auto stop_time = chrono::high_resolution_clock::now();
-        auto duration = chrono::duration_cast<chrono::milliseconds>(stop_time - start_time);
+        auto duration = chrono::duration_cast<chrono::seconds>(stop_time - start_time);
 
-        cout << "Wall clock time: " << duration.count() << " milliseconds" << endl;
+        cout << "Wall clock time: " << duration.count() << " seconds" << endl;
         cout << "Computed path size: " << path.size() << endl;
 
         first_run = false;
@@ -290,3 +338,4 @@ void planner(
     return;
 }
 
+// todo: can probs take out the end codition checks since I added finding the last goal check
