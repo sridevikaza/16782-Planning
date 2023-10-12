@@ -9,8 +9,7 @@
                 "-g",            // Generate debugging information
                 "-o",
                 "${workspaceRoot}/myprogram",   // Output executable name
-                "${workspaceRoot}/runtest.cpp",   // Input source code file(s)
-                "${workspaceRoot}/plannerv4.cpp"   // Input source code file(s)
+                "${workspaceRoot}/planner.cpp"   // Input source code file(s)
             ],
             "group": {
                 "kind": "build",

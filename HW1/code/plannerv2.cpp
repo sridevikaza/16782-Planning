@@ -54,7 +54,7 @@ struct compareSmaller {
 };
 
 // actual A* search algorithm
-tuple<vector<int>, vector<int>> astar( //todo make return a ptr
+tuple<vector<int>, vector<int>> astar(
     int xstart,
     int ystart,
     int xgoal,
@@ -63,8 +63,6 @@ tuple<vector<int>, vector<int>> astar( //todo make return a ptr
     int x_size,
     int y_size,
     int collision_thresh
-    // shared_ptr<vector<int>> xmoves,
-    // shared_ptr<vector<int>> ymoves
     )
 {
     cout << "running A* search" << endl;
@@ -72,9 +70,9 @@ tuple<vector<int>, vector<int>> astar( //todo make return a ptr
     // initialize data structures
     unique_ptr<vector<int>> xmoves = make_unique<vector<int>>();
     unique_ptr<vector<int>> ymoves = make_unique<vector<int>>();
-    unique_ptr<vector<int>> g_vals = make_unique<vector<int>>(x_size*y_size, INFINITY);     // g values // todo: maybe use a deque
+    unique_ptr<vector<int>> g_vals = make_unique<vector<int>>(x_size*y_size, INFINITY);     // g values 
     unique_ptr<vector<bool>> closed_list = make_unique<vector<bool>>(x_size*y_size);        // closed list
-    priority_queue<pair<double, int>, vector<pair<double, int>>, compareSmaller> open_list; // open list // todo: use a unique ptr and possibly make vector
+    priority_queue<pair<double, int>, vector<pair<double, int>>, compareSmaller> open_list; // open list 
 
     // initialize start conditions
     int x = xstart;
@@ -138,7 +136,7 @@ tuple<vector<int>, vector<int>> astar( //todo make return a ptr
                             ymoves->push_back(dY[dir]);
 
                             // update open list
-                            double f = (*g_vals)[x_size*(yprime-1)+xprime];// + getDistance(x, y, xprime, yprime);
+                            double f = (*g_vals)[x_size*(yprime-1)+xprime] + getDistance(x, y, xprime, yprime);
                             open_list.push(make_pair(f, x_size*(yprime-1)+xprime)); // insert s into open list
 
                         }
@@ -168,7 +166,7 @@ stack<pair<int,int>> backtrack(int xstart, int ystart, int xgoal, int ygoal, con
     while (xcurr != xstart || ycurr != ystart) {
         path.push({xcurr, ycurr});
         xcurr -= xmoves[index];
-        ycurr -= ymoves[index]; // todo: make sure this is correct
+        ycurr -= ymoves[index];
         index--;
     }
 
@@ -177,7 +175,7 @@ stack<pair<int,int>> backtrack(int xstart, int ystart, int xgoal, int ygoal, con
 
 
 // initializing the search, call astar algorithm, and backtrack to get path
-stack<pair<int,int>> getPath(int xstart, int ystart, int xgoal, int ygoal, int* map,int x_size,int y_size,int collision_thresh){ //todo: maybe dont use a stack with pairs (use vector?)
+stack<pair<int,int>> getPath(int xstart, int ystart, int xgoal, int ygoal, int* map,int x_size,int y_size,int collision_thresh){
     
     // call A* algorithm
     // shared_ptr<vector<int>> xmoves = make_shared<vector<int>>();
@@ -219,7 +217,7 @@ void planner(
     int* action_ptr
     )
 {
-    cout << "Running Planner V3" << endl;
+    cout << "Running Planner V2" << endl;
 
     if (first_run){
 

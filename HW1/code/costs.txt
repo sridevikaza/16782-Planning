@@ -26,7 +26,7 @@ map1 - 5317
 map2 - 5738464
 map3 - 462
 map4 - 637
-map5 - NO
+map5 - NO (181)
 map6 - 2800
 map7 - 0
 map8 - NO
