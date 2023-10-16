@@ -12,6 +12,9 @@
 #include <unordered_set>
 #include <queue>
 
+#include <limits>
+#include <cmath>
+
 #include <tuple>
 #include <string>
 #include <stdexcept>
@@ -348,6 +351,148 @@ static void planner(
 //                                                                                                                   //
 //*******************************************************************************************************************//
 
+class Config {
+public:
+    std::vector<double> values; // Each value corresponds to a joint angle or other configuration parameter
+
+    Config(size_t dim) : values(dim, 0.0) {}
+};
+
+class RRTPlanner {
+	public:
+		struct Node {
+			Config config;
+			Node* parent;
+
+			Node(const Config& conf) : config(conf), parent(nullptr) {}
+		};
+
+		std::vector<Node*> nodes;
+		int numofDOFs;
+		double epsilon;
+
+		RRTPlanner(double eps, int numofDOFs) : numofDOFs(numofDOFs), epsilon(eps) {}
+		Node* nearestNeighbor(const Config& q);
+		bool newConfig(const Node* qNear, const Config& q, Config& qNew);
+		void addVertex(const Config& qNew);
+		void addEdge(Node* parent, Node* child);
+		Node* extend(const Config& q);
+		Node* buildRRT(const Config& qInit, int K);
+		void extractPath(Node* goalNode, double ***&plan, int &pathLength);
+};
+
+RRTPlanner::Node* RRTPlanner::nearestNeighbor(const Config& q) {
+    Node* nearest = nullptr;
+    double minDist = std::numeric_limits<double>::max();
+
+    for (Node* node : nodes) {
+        double dist = 0.0;
+        for (size_t i = 0; i < dimensions; i++) {
+            dist += std::pow(node->config.values[i] - q.values[i], 2);
+        }
+        dist = std::sqrt(dist);
+        if (dist < minDist) {
+            minDist = dist;
+            nearest = node;
+        }
+    }
+    return nearest;
+}
+
+bool RRTPlanner::newConfig(const Node* qNear, const Config& q, Config& qNew) {
+    double dist = 0.0;
+    for (size_t i = 0; i < dimensions; i++) {
+        dist += std::pow(qNear->config.values[i] - q.values[i], 2);
+    }
+    dist = std::sqrt(dist);
+
+    // If the distance is less than epsilon, we can directly connect
+    if (dist < epsilon) {
+        qNew = q;
+        return true;
+    }
+
+    // Move by at most epsilon in the direction of q
+    for (size_t i = 0; i < dimensions; i++) {
+        qNew.values[i] = qNear->config.values[i] + epsilon * (q.values[i] - qNear->config.values[i]) / dist;
+    }
+    return true; // Note: In practice, you'd also check for collisions here and return false if there's an obstacle
+}
+
+void RRTPlanner::addVertex(const Config& qNew) {
+    nodes.push_back(new Node(qNew));
+}
+
+void RRTPlanner::addEdge(Node* parent, Node* child) {
+    child->parent = parent; // In this simple representation, the "edge" is just the parent pointer in the node
+}
+
+RRTPlanner::Node* RRTPlanner::extend(const Config& q) {
+    Node* qNear = nearestNeighbor(q);
+    Config qNew(dimensions);
+    if (newConfig(qNear, q, qNew)) {
+        addVertex(qNew);
+        Node* qNewNode = nodes.back();
+        addEdge(qNear, qNewNode);
+
+        if (qNew.values == q.values) { // This checks if vectors are identical. You might want to replace this with a distance function in practice
+            return qNewNode; // Reached
+        } else {
+            return nullptr; // Advanced
+        }
+    }
+    return nullptr; // Trapped
+}
+
+RRTPlanner::Node* RRTPlanner::buildRRT(const Config& qInit, int K) {
+    nodes.clear();
+    addVertex(qInit);
+
+    for (int k = 0; k < K; k++) {
+        Config qRand(dimensions);
+        // Populate qRand with random values. Here we assume each value is between 0 and 1 for simplicity. Adjust according to your environment.
+        for (size_t i = 0; i < dimensions; i++) {
+            qRand.values[i] = static_cast<double>(rand()) / RAND_MAX; // Random value between 0 and 1
+        }
+
+        Node* result = extend(qRand);
+        if (result) { // We have reached the goal
+            return result;
+        }
+    }
+    return nullptr; // Could not find a path after K iterations
+}
+
+void RRTPlanner::extractPath(Node* goalNode, double ***&plan, int &pathLength) {
+    // Find path length by backtracking from the goal
+    pathLength = 0;
+    Node* current = goalNode;
+    while (current != nullptr) {
+        pathLength++;
+        current = current->parent;
+    }
+
+    // Allocate memory for the plan
+    plan = new double**[pathLength];
+    for (int i = 0; i < pathLength; i++) {
+        plan[i] = new double*[1]; // Assuming one configuration per step
+        plan[i][0] = new double[dimensions];
+    }
+
+    // Now extract the path
+    current = goalNode;
+    int index = pathLength - 1; // Start from the end
+    while (current != nullptr) {
+        for (size_t dim = 0; dim < dimensions; dim++) {
+            plan[index][0][dim] = current->config.values[dim];
+        }
+        current = current->parent;
+        index--;
+    }
+}
+
+
+
 static void plannerRRT(
     double *map,
     int x_size,
@@ -359,7 +504,10 @@ static void plannerRRT(
     int *planlength)
 {
     /* TODO: Replace with your implementation */
-    planner(map, x_size, y_size, armstart_anglesV_rad, armgoal_anglesV_rad, numofDOFs, plan, planlength);
+	size_t dim = numofDOFs; // change type later
+	double eps = (x_size*y_size)/10;
+	RRTPlanner rrt(eps,map,x_size,y_size,armstart_anglesV_rad,armgoal_anglesV_rad,numofDOFs,planlength);
+
 }
 
 //*******************************************************************************************************************//
@@ -600,7 +748,7 @@ static void plannerPRM(
     int goalIdx = getNodeIndex(nodes, armgoal_anglesV_rad);
 
     vector<int> pathIndices = searchGraph(startIdx, goalIdx, edges, nodes, numofDOFs);
-    
+
     if (!pathIndices.empty()) {
         *planlength = pathIndices.size();
         *plan = (double**) malloc(*planlength * sizeof(double*));
