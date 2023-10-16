@@ -351,43 +351,51 @@ static void planner(
 //                                                                                                                   //
 //*******************************************************************************************************************//
 
-class Config {
-public:
-    std::vector<double> values; // Each value corresponds to a joint angle or other configuration parameter
+struct Config{
+	std::vector<double> values;
+	Config(int numofDOFs) : values(numofDOFs, 0.0) {}
+};
 
-    Config(size_t dim) : values(dim, 0.0) {}
+struct Node {
+	Config config;
+	Node* parent;
+
+	Node(const Config& conf) : config(conf), parent(nullptr) {}
 };
 
 class RRTPlanner {
 	public:
-		struct Node {
-			Config config;
-			Node* parent;
-
-			Node(const Config& conf) : config(conf), parent(nullptr) {}
-		};
 
 		std::vector<Node*> nodes;
-		int numofDOFs;
 		double epsilon;
+	    double *map;
+    	int x_size;
+    	int y_size;
+    	vector<double> start;
+    	vector<double> goal;
+    	int numofDOFs;
 
-		RRTPlanner(double eps, int numofDOFs) : numofDOFs(numofDOFs), epsilon(eps) {}
+		RRTPlanner(double epsilon, double* map, int x_size, int y_size, vector<double> start, vector<double> goal, int numofDOFs):
+			epsilon(epsilon), map(map), x_size(x_size), y_size(y_size), start(start), goal(goal), numofDOFs(numofDOFs) {}
+		
 		Node* nearestNeighbor(const Config& q);
 		bool newConfig(const Node* qNear, const Config& q, Config& qNew);
 		void addVertex(const Config& qNew);
 		void addEdge(Node* parent, Node* child);
 		Node* extend(const Config& q);
-		Node* buildRRT(const Config& qInit, int K);
-		void extractPath(Node* goalNode, double ***&plan, int &pathLength);
+		Node* buildRRT(int K);
+		void extractPath(Node* goalNode, double ***&plan, int *&pathLength);
+		bool checkDist(const Config& q1, const Config& q2, double threshold);
 };
 
-RRTPlanner::Node* RRTPlanner::nearestNeighbor(const Config& q) {
+
+Node* RRTPlanner::nearestNeighbor(const Config& q) {
     Node* nearest = nullptr;
     double minDist = std::numeric_limits<double>::max();
 
     for (Node* node : nodes) {
         double dist = 0.0;
-        for (size_t i = 0; i < dimensions; i++) {
+        for (size_t i = 0; i < numofDOFs; i++) {
             dist += std::pow(node->config.values[i] - q.values[i], 2);
         }
         dist = std::sqrt(dist);
@@ -401,7 +409,7 @@ RRTPlanner::Node* RRTPlanner::nearestNeighbor(const Config& q) {
 
 bool RRTPlanner::newConfig(const Node* qNear, const Config& q, Config& qNew) {
     double dist = 0.0;
-    for (size_t i = 0; i < dimensions; i++) {
+    for (size_t i = 0; i < numofDOFs; i++) {
         dist += std::pow(qNear->config.values[i] - q.values[i], 2);
     }
     dist = std::sqrt(dist);
@@ -413,10 +421,10 @@ bool RRTPlanner::newConfig(const Node* qNear, const Config& q, Config& qNew) {
     }
 
     // Move by at most epsilon in the direction of q
-    for (size_t i = 0; i < dimensions; i++) {
+    for (size_t i = 0; i < numofDOFs; i++) {
         qNew.values[i] = qNear->config.values[i] + epsilon * (q.values[i] - qNear->config.values[i]) / dist;
     }
-    return true; // Note: In practice, you'd also check for collisions here and return false if there's an obstacle
+    return true; // todo: In practice, you'd also check for collisions here and return false if there's an obstacle
 }
 
 void RRTPlanner::addVertex(const Config& qNew) {
@@ -427,15 +435,15 @@ void RRTPlanner::addEdge(Node* parent, Node* child) {
     child->parent = parent; // In this simple representation, the "edge" is just the parent pointer in the node
 }
 
-RRTPlanner::Node* RRTPlanner::extend(const Config& q) {
+Node* RRTPlanner::extend(const Config& q) {
     Node* qNear = nearestNeighbor(q);
-    Config qNew(dimensions);
+    Config qNew(numofDOFs);
     if (newConfig(qNear, q, qNew)) {
         addVertex(qNew);
         Node* qNewNode = nodes.back();
         addEdge(qNear, qNewNode);
-
-        if (qNew.values == q.values) { // This checks if vectors are identical. You might want to replace this with a distance function in practice
+		
+        if (checkDist(qNew, q, epsilon/10)) {
             return qNewNode; // Reached
         } else {
             return nullptr; // Advanced
@@ -444,26 +452,56 @@ RRTPlanner::Node* RRTPlanner::extend(const Config& q) {
     return nullptr; // Trapped
 }
 
-RRTPlanner::Node* RRTPlanner::buildRRT(const Config& qInit, int K) {
+
+bool RRTPlanner::checkDist(const Config& q1, const Config& q2, double threshold){
+    double sum = 0.0;
+
+    // Compute squared Euclidean distance
+    for (size_t i = 0; i < numofDOFs; i++) {
+        sum += (q1.values[i] - q2.values[i]) * (q1.values[i] - q2.values[i]);
+    }
+    double distance = sqrt(sum);
+
+    // Check if distance is within threshold
+    return distance <= threshold;
+}
+
+Node* RRTPlanner::buildRRT(int K) {
     nodes.clear();
+
+	Config qInit(numofDOFs);
+	qInit.values = start;
     addVertex(qInit);
 
+	Config qGoal(numofDOFs);
+	qInit.values = goal;
+    addVertex(qGoal);
+
     for (int k = 0; k < K; k++) {
-        Config qRand(dimensions);
-        // Populate qRand with random values. Here we assume each value is between 0 and 1 for simplicity. Adjust according to your environment.
-        for (size_t i = 0; i < dimensions; i++) {
-            qRand.values[i] = static_cast<double>(rand()) / RAND_MAX; // Random value between 0 and 1
+        Config qRand(numofDOFs);
+        double biasProbability = static_cast<double>(rand()) / RAND_MAX; // Random value between 0 and 1
+
+        // 10% bias towards the goal
+        if (biasProbability <= 0.1) {
+            qRand = qGoal;
+        } else {
+            // Generate random configuration
+            for (size_t i = 0; i < numofDOFs; i++) {
+                qRand.values[i] = static_cast<double>(rand()) / RAND_MAX;
+            }
         }
 
         Node* result = extend(qRand);
-        if (result) { // We have reached the goal
+        if (checkDist(result->config, qGoal, epsilon/10)) { // We have reached the goal
             return result;
         }
     }
     return nullptr; // Could not find a path after K iterations
 }
 
-void RRTPlanner::extractPath(Node* goalNode, double ***&plan, int &pathLength) {
+
+
+void RRTPlanner::extractPath(Node* goalNode, double ***&plan, int *&pathLength) {
     // Find path length by backtracking from the goal
     pathLength = 0;
     Node* current = goalNode;
@@ -473,25 +511,23 @@ void RRTPlanner::extractPath(Node* goalNode, double ***&plan, int &pathLength) {
     }
 
     // Allocate memory for the plan
-    plan = new double**[pathLength];
-    for (int i = 0; i < pathLength; i++) {
+    plan = new double**[*pathLength];
+    for (int i = 0; i < *pathLength; i++) {
         plan[i] = new double*[1]; // Assuming one configuration per step
-        plan[i][0] = new double[dimensions];
+        plan[i][0] = new double[numofDOFs];
     }
 
     // Now extract the path
     current = goalNode;
-    int index = pathLength - 1; // Start from the end
+    int index = *pathLength - 1; // Start from the end
     while (current != nullptr) {
-        for (size_t dim = 0; dim < dimensions; dim++) {
+        for (size_t dim = 0; dim < numofDOFs; dim++) {
             plan[index][0][dim] = current->config.values[dim];
         }
         current = current->parent;
         index--;
     }
 }
-
-
 
 static void plannerRRT(
     double *map,
@@ -503,10 +539,18 @@ static void plannerRRT(
     double ***plan,
     int *planlength)
 {
-    /* TODO: Replace with your implementation */
-	size_t dim = numofDOFs; // change type later
-	double eps = (x_size*y_size)/10;
-	RRTPlanner rrt(eps,map,x_size,y_size,armstart_anglesV_rad,armgoal_anglesV_rad,numofDOFs,planlength);
+	double epsilon = (x_size*y_size)/10;
+	vector<double> start(armstart_anglesV_rad, armstart_anglesV_rad+numofDOFs);
+	vector<double> goal(armgoal_anglesV_rad, armgoal_anglesV_rad + numofDOFs);
+
+	RRTPlanner rrt(epsilon,map,x_size,y_size,start,goal,numofDOFs);
+
+	Node* result = rrt.buildRRT(1000);
+	if (result) {
+		rrt.extractPath(result, plan, planlength);
+		// Your plan variable now contains the path
+	}
+
 
 }
 
