@@ -359,7 +359,6 @@ struct Config{
 struct Node {
 	Config config;
 	Node* parent;
-
 	Node(const Config& conf) : config(conf), parent(nullptr) {}
 };
 
@@ -382,13 +381,15 @@ class RRTPlanner {
 		bool newConfig(const Node* qNear, const Config& q, Config& qNew);
 		void addVertex(const Config& qNew);
 		void addEdge(Node* parent, Node* child);
-		Node* extend(const Config& q);
+		Node* extendRRT(const Config& q);
 		Node* buildRRT(int K);
-		void extractPath(Node* goalNode, double ***&plan, int *&pathLength);
+		void extractPath(Node* goalNode, double ***plan, int *pathLength);
 		bool checkDist(const Config& q1, const Config& q2, double threshold);
+        Node* buildRRTConnect(int K);
+        bool connect(Node* qNear, const Config& q);
 };
 
-
+// returns nearest neighboring node
 Node* RRTPlanner::nearestNeighbor(const Config& q) {
     Node* nearest = nullptr;
     double minDist = std::numeric_limits<double>::max();
@@ -399,6 +400,7 @@ Node* RRTPlanner::nearestNeighbor(const Config& q) {
             dist += std::pow(node->config.values[i] - q.values[i], 2);
         }
         dist = std::sqrt(dist);
+
         if (dist < minDist) {
             minDist = dist;
             nearest = node;
@@ -407,51 +409,64 @@ Node* RRTPlanner::nearestNeighbor(const Config& q) {
     return nearest;
 }
 
+// move towards q
 bool RRTPlanner::newConfig(const Node* qNear, const Config& q, Config& qNew) {
     double dist = 0.0;
     for (size_t i = 0; i < numofDOFs; i++) {
-        dist += std::pow(qNear->config.values[i] - q.values[i], 2);
+        dist += pow(qNear->config.values[i] - q.values[i], 2);
     }
-    dist = std::sqrt(dist);
+    dist = sqrt(dist);
 
-    // If the distance is less than epsilon, we can directly connect
-    if (dist < epsilon) {
-        qNew = q;
-        return true;
+    double stepSize = std::min(epsilon, dist) / dist;  // Scaling factor, ensures step size doesn't exceed distance
+
+    bool advancementMade = false;
+
+    // Interpolate from qNear towards q and check for collisions
+    for (double alpha = stepSize; alpha <= 1.0; alpha += stepSize) {
+        Config tempConfig(numofDOFs);  // Temporary configuration for collision checking
+
+        for (size_t i = 0; i < numofDOFs; i++) {
+            tempConfig.values[i] = qNear->config.values[i] + alpha * (q.values[i] - qNear->config.values[i]);
+        }
+
+        // convert to array
+        double* config_arr = new double[numofDOFs];
+        for (int i = 0; i < numofDOFs; ++i) {
+            config_arr[i] = tempConfig.values[i];
+        }
+
+        // If the configuration is valid, update qNew and mark advancement
+        if (IsValidArmConfiguration(config_arr, numofDOFs, map, x_size, y_size)) {
+            qNew = tempConfig;
+            advancementMade = true;
+        } else {
+            break;  // Stop interpolating if we hit a collision
+        }
     }
 
-    // Move by at most epsilon in the direction of q
-    for (size_t i = 0; i < numofDOFs; i++) {
-        qNew.values[i] = qNear->config.values[i] + epsilon * (q.values[i] - qNear->config.values[i]) / dist;
-    }
-    return true; // todo: In practice, you'd also check for collisions here and return false if there's an obstacle
+    // If any advancement was made towards q, return true
+    return advancementMade;
 }
 
 void RRTPlanner::addVertex(const Config& qNew) {
     nodes.push_back(new Node(qNew));
 }
 
-void RRTPlanner::addEdge(Node* parent, Node* child) {
-    child->parent = parent; // In this simple representation, the "edge" is just the parent pointer in the node
+void RRTPlanner::addEdge(Node* parent_node, Node* child_node) {
+    child_node->parent = parent_node;
 }
 
-Node* RRTPlanner::extend(const Config& q) {
+Node* RRTPlanner::extendRRT(const Config& q) {
     Node* qNear = nearestNeighbor(q);
     Config qNew(numofDOFs);
-    if (newConfig(qNear, q, qNew)) {
+    if (newConfig(qNear, q, qNew)) { // reached or advanced
         addVertex(qNew);
         Node* qNewNode = nodes.back();
         addEdge(qNear, qNewNode);
-		
-        if (checkDist(qNew, q, epsilon/10)) {
-            return qNewNode; // Reached
-        } else {
-            return nullptr; // Advanced
-        }
+        return qNewNode;
     }
-    return nullptr; // Trapped
+    return nullptr; // trapped
 }
-
 
 bool RRTPlanner::checkDist(const Config& q1, const Config& q2, double threshold){
     double sum = 0.0;
@@ -467,32 +482,31 @@ bool RRTPlanner::checkDist(const Config& q1, const Config& q2, double threshold)
 }
 
 Node* RRTPlanner::buildRRT(int K) {
-    nodes.clear();
+    // nodes.clear();
 
 	Config qInit(numofDOFs);
 	qInit.values = start;
     addVertex(qInit);
 
 	Config qGoal(numofDOFs);
-	qInit.values = goal;
-    addVertex(qGoal);
+	qGoal.values = goal;
 
     for (int k = 0; k < K; k++) {
         Config qRand(numofDOFs);
         double biasProbability = static_cast<double>(rand()) / RAND_MAX; // Random value between 0 and 1
 
         // 10% bias towards the goal
-        if (biasProbability <= 0.1) {
+        if (biasProbability <= 0.1) { // todo: tune
             qRand = qGoal;
         } else {
             // Generate random configuration
             for (size_t i = 0; i < numofDOFs; i++) {
-                qRand.values[i] = static_cast<double>(rand()) / RAND_MAX;
+                qRand.values[i] = ((double) rand() / RAND_MAX) * 2 * M_PI; // Random value between 0 and 2pi
             }
         }
 
-        Node* result = extend(qRand);
-        if (checkDist(result->config, qGoal, epsilon/10)) { // We have reached the goal
+        Node* result = extendRRT(qRand);
+        if (result && checkDist(result->config, qGoal, 0.01)) { // We have reached the goal //todo: tune distance threshold
             return result;
         }
     }
@@ -500,33 +514,26 @@ Node* RRTPlanner::buildRRT(int K) {
 }
 
 
-
-void RRTPlanner::extractPath(Node* goalNode, double ***&plan, int *&pathLength) {
+void RRTPlanner::extractPath(Node* result, double ***plan, int *planlength) {
     // Find path length by backtracking from the goal
-    pathLength = 0;
-    Node* current = goalNode;
+    int len = 0;
+    Node* current = result;
     while (current != nullptr) {
-        pathLength++;
+        len++;
         current = current->parent;
     }
 
-    // Allocate memory for the plan
-    plan = new double**[*pathLength];
-    for (int i = 0; i < *pathLength; i++) {
-        plan[i] = new double*[1]; // Assuming one configuration per step
-        plan[i][0] = new double[numofDOFs];
-    }
-
-    // Now extract the path
-    current = goalNode;
-    int index = *pathLength - 1; // Start from the end
-    while (current != nullptr) {
-        for (size_t dim = 0; dim < numofDOFs; dim++) {
-            plan[index][0][dim] = current->config.values[dim];
+    // extract the path
+    current = result;
+    *plan = (double**) malloc(len*sizeof(double*));
+    for (int i = len-1; i >= 0; i--){
+        (*plan)[i] = (double*) malloc(numofDOFs*sizeof(double)); 
+        for(int j = 0; j < numofDOFs; j++){
+            (*plan)[i][j] = current->config.values[j];
         }
         current = current->parent;
-        index--;
     }
+    *planlength = len;
 }
 
 static void plannerRRT(
@@ -539,19 +546,18 @@ static void plannerRRT(
     double ***plan,
     int *planlength)
 {
-	double epsilon = (x_size*y_size)/10;
+	double epsilon = 0.1; // todo: tune
 	vector<double> start(armstart_anglesV_rad, armstart_anglesV_rad+numofDOFs);
 	vector<double> goal(armgoal_anglesV_rad, armgoal_anglesV_rad + numofDOFs);
 
 	RRTPlanner rrt(epsilon,map,x_size,y_size,start,goal,numofDOFs);
 
-	Node* result = rrt.buildRRT(1000);
+	Node* result = rrt.buildRRT(100000);
 	if (result) {
-		rrt.extractPath(result, plan, planlength);
-		// Your plan variable now contains the path
+        rrt.extractPath(result, plan, planlength);
 	}
-
-
+    
+    return;
 }
 
 //*******************************************************************************************************************//
@@ -676,6 +682,21 @@ static void add_edge(unordered_map<int, unordered_set<int>>& edges, int alpha_i,
     }
 }
 
+// find closest node, add to nodes list, and add edge
+void connectClosest(double* vertex, unordered_map<int, double*>& nodes, int numofDOFs, unordered_map<int, unordered_set<int>>& edges, int index){
+    int i;
+    double min_dist = std::numeric_limits<double>::max();
+    for (const auto& n : nodes) {
+        double dist = getDistance(vertex, n.second, numofDOFs);
+        if (dist <= min_dist) {
+            min_dist = dist;
+            i = n.first;
+        }
+    }
+    add_edge(edges,index,i);
+    nodes.insert(make_pair(index, vertex));
+}
+
 // get index from node
 int getNodeIndex(const unordered_map<int, double*>& nodes, double* node){
 	for (const auto& n: nodes){
@@ -757,8 +778,8 @@ static void plannerPRM(
     double ***plan,
     int *planlength)
 {
-	int steps = 50;
-	double neighborhood_size = (x_size*y_size)/100;
+	int steps = 50; // todo: tune
+	double neighborhood_size = (x_size*y_size)/100; //todo: tune
 	unordered_map<int, unordered_set<int>> edges;
 	unordered_map<int, double*> nodes;
 	int i = 0;
@@ -770,9 +791,7 @@ static void plannerPRM(
 
 		// add vertex to graph if in Cfree
 		if (IsValidArmConfiguration(alpha, numofDOFs, map, x_size, y_size)){
-			// vertices.push_back(alpha);
 			nodes.insert(make_pair(i, alpha));
-			// i++;
 
 			// check neighborhood for points
 			vector<double*> neighbors = getNeighbors(neighborhood_size, alpha, nodes, numofDOFs);
@@ -788,11 +807,16 @@ static void plannerPRM(
 		}
 	}
 
-	int startIdx = getNodeIndex(nodes, armstart_anglesV_rad);
-    int goalIdx = getNodeIndex(nodes, armgoal_anglesV_rad);
+    // connect closest nodes to start and goal
+    int startIdx = -1;
+    int goalIdx = -2;
+    connectClosest(armstart_anglesV_rad, nodes, numofDOFs, edges, startIdx);
+    connectClosest(armgoal_anglesV_rad, nodes, numofDOFs, edges, goalIdx);
 
+    // search graph using A*
     vector<int> pathIndices = searchGraph(startIdx, goalIdx, edges, nodes, numofDOFs);
 
+    // populate plan
     if (!pathIndices.empty()) {
         *planlength = pathIndices.size();
         *plan = (double**) malloc(*planlength * sizeof(double*));
