@@ -958,7 +958,13 @@ void connectClosest(double* vertex, unordered_map<int, double*>& nodes, int numo
             i = n.first;
         }
     }
-    add_edge(edges,index,i);
+    if (index==-1){
+        add_edge(edges,index,i);
+    }
+    else{
+        add_edge(edges,i,index);
+    }
+    
     nodes.insert(make_pair(index, vertex));
 }
 
@@ -970,7 +976,7 @@ int getNodeIndex(const unordered_map<int, double*>& nodes, double* node){
 		}
 	}
 	cout << "node not found" << endl;
-	return -1; // node not found
+	return -10; // node not found
 }
 
 struct AStarNode {
@@ -1003,13 +1009,14 @@ vector<int> searchGraph(int startIdx,
         openList.pop();
 
         if (current.index == goalIdx) {
+            cout << "FOUND GOAL" << endl;
             // Backtrack and return the plan
             vector<int> plan;
             while (current.parent != -1) {
                 plan.push_back(current.index);
                 current = parentMap[current.parent];
             }
-            plan.push_back(startIdx); // don't forget to add the start
+            plan.push_back(startIdx);
             reverse(plan.begin(), plan.end());
             return plan;
         }
@@ -1044,7 +1051,7 @@ static void plannerPRM(
     int *planlength)
 {
 	int steps = 50; // todo: tune
-	double neighborhood_size = (x_size*y_size)/100; //todo: tune
+	double neighborhood_size = (x_size*y_size)/1000; //todo: tune
 	unordered_map<int, unordered_set<int>> edges;
 	unordered_map<int, double*> nodes;
 	int i = 0;
@@ -1065,7 +1072,9 @@ static void plannerPRM(
     		for (const auto& q : neighbors) {
 				if (checkEdge(alpha, q, numofDOFs, steps, map, x_size, y_size)){
 					int q_i = getNodeIndex(nodes, q);
-					add_edge(edges, i, q_i);
+                    if (edges[i].size() < 10){
+                        add_edge(edges, q_i, i);
+                    }
 				}
 			}
 			i++;
@@ -1077,6 +1086,12 @@ static void plannerPRM(
     int goalIdx = -2;
     connectClosest(armstart_anglesV_rad, nodes, numofDOFs, edges, startIdx);
     connectClosest(armgoal_anglesV_rad, nodes, numofDOFs, edges, goalIdx);
+
+    // cout << nodes[-2][0] << endl;
+    // auto edge_set = edges[881];
+    // for (const auto& elem : edge_set) {
+    //     std::cout << elem << endl;
+    // }
 
     // search graph using A*
     vector<int> pathIndices = searchGraph(startIdx, goalIdx, edges, nodes, numofDOFs);
@@ -1095,6 +1110,7 @@ static void plannerPRM(
     }
 
 }
+
 
 //*******************************************************************************************************************//
 //                                                                                                                   //
