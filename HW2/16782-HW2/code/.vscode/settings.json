@@ -8,6 +8,7 @@
         "utility": "cpp",
         "new": "cpp",
         "functional": "cpp",
-        "stdexcept": "cpp"
+        "stdexcept": "cpp",
+        "ostream": "cpp"
     }
 }

@@ -382,11 +382,11 @@ class RRTPlanner {
 		bool newConfig(const Node* qNear, const Config& q, Config& qNew);
 		void addVertex(const Config& qNew, bool from_start = true);
 		void addEdge(Node* parent, Node* child);
-        Node* extendRRT(const Config& q, bool from_start = true);
+        pair<bool,Node*> extendRRT(const Config& q, bool from_start = true);
 		Node* buildRRT(int K);
 		void extractPath(Node* goalNode, double ***plan, int *pathLength);
         void extractPathConnect(Node* startConnectNode, Node* goalConnectNode, double ***plan, int *planlength);
-		bool checkDist(const Config& q1, const Config& q2, double threshold);
+		bool checkDist(const Config& q1, const Config& q2);
         pair<Node*, Node*> buildRRTConnect(int K);
         Node* connect(const Config& q, bool from_start);
 };
@@ -462,7 +462,8 @@ void RRTPlanner::addEdge(Node* parent_node, Node* child_node) {
     child_node->parent = parent_node;
 }
 
-Node* RRTPlanner::extendRRT(const Config& q, bool from_start) {
+// extend qNear towards q
+pair<bool,Node*> RRTPlanner::extendRRT(const Config& q, bool from_start) {
     Node* qNear = nearestNeighbor(q, from_start);
     vector<Node*>& nodes = from_start ? start_nodes : goal_nodes;
     Config qNew(numofDOFs);
@@ -471,19 +472,19 @@ Node* RRTPlanner::extendRRT(const Config& q, bool from_start) {
         addVertex(qNew, from_start);
         Node* qNewNode = nodes.back();
         addEdge(qNear, qNewNode);
-        return qNewNode;
+        return make_pair(true,qNewNode);
     }
-    return nullptr; // trapped
+    return make_pair(false,qNear); // trapped
 }
 
 // connect towards q until it's reached or trapped
 Node* RRTPlanner::connect(const Config& q, bool from_start){
     while(true){
-        Node* result = extendRRT(q, from_start);
-        if (result){
-            if (checkDist(result->config, q, 0.01)){ //todo: tune
+        auto result = extendRRT(q, from_start);
+        if (result.first){
+            if (checkDist(result.second->config, q)){
                 cout << "reached" << endl;
-                return result; // reached
+                return result.second; // reached
             }
             cout << "advanced" << endl;
         } else {
@@ -493,7 +494,7 @@ Node* RRTPlanner::connect(const Config& q, bool from_start){
     }
 }
 
-bool RRTPlanner::checkDist(const Config& q1, const Config& q2, double threshold){
+bool RRTPlanner::checkDist(const Config& q1, const Config& q2){
     double sum = 0.0;
 
     // Compute squared Euclidean distance
@@ -505,7 +506,7 @@ bool RRTPlanner::checkDist(const Config& q1, const Config& q2, double threshold)
     cout << "distance: " << distance << endl;
 
     // Check if distance is within threshold
-    return distance <= threshold;
+    return distance <= 1e-3;
 }
 
 Node* RRTPlanner::buildRRT(int K) {
@@ -531,10 +532,10 @@ Node* RRTPlanner::buildRRT(int K) {
                 qRand.values[i] = ((double) rand() / RAND_MAX) * 2 * M_PI; // Random value between 0 and 2pi
             }
         }
-        Node* result = extendRRT(qRand);
+        auto result = extendRRT(qRand);
 
-        if (checkDist(result->config, qGoal, 0.01)) { // We have reached the goal //todo: tune distance threshold
-            return result;
+        if (checkDist(result.second->config, qGoal)) { // We have reached the goal
+            return result.second;
         }
     }
     return nullptr; // Could not find a path after K iterations
@@ -567,14 +568,14 @@ pair<Node*, Node*> RRTPlanner::buildRRTConnect(int K) {
         }
 
         // extend from one side
-        Node* result = extendRRT(qRand, from_start);
+        Node* resultNode = extendRRT(qRand, from_start).second;
         
         // connect from other side
-        Config qConnect = result ? result->config : qRand;
-        Node* connectNode = connect(qConnect, !from_start);
+        // Config qConnect = result ? result->config : qRand;
+        Node* connectNode = connect(resultNode->config, !from_start);
         if (connectNode){ // both sides reached each other
             // addEdge(result, connectNode);
-            auto pathEnds = from_start ? make_pair(result,connectNode) : make_pair(connectNode,result);
+            auto pathEnds = from_start ? make_pair(resultNode,connectNode) : make_pair(connectNode,resultNode);
             return pathEnds; // returning connection node
         }
 
@@ -693,7 +694,7 @@ static void plannerRRTConnect(
     double ***plan,
     int *planlength)
 {
-	double epsilon = 0.2; // todo: tune
+	double epsilon = 0.1; // todo: tune
 	vector<double> start(armstart_anglesV_rad, armstart_anglesV_rad+numofDOFs);
 	vector<double> goal(armgoal_anglesV_rad, armgoal_anglesV_rad + numofDOFs);
 
