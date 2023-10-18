@@ -21,7 +21,9 @@
 #include <regex> // For regex and split logic
 #include <iostream> // cout, endl
 #include <fstream> // For reading/writing files
-#include <assert.h> 
+#include <assert.h>
+
+// #include "RRT.hpp"
 
 /* Input Arguments */
 #define	MAP_IN      prhs[0]
@@ -351,16 +353,20 @@ static void planner(
 //                                                                                                                   //
 //*******************************************************************************************************************//
 
+// represents a joint angle configuration
 struct Config{
 	std::vector<double> values;
 	Config(int numofDOFs) : values(numofDOFs, 0.0) {}
 };
 
+// represents the graph structure
 struct Node {
 	Config config;
 	Node* parent;
-	Node(const Config& conf) : config(conf), parent(nullptr) {}
+    double cost;
+    Node(const Config& conf) : config(conf), parent(nullptr), cost(0.0) {}  // initialize to 0
 };
+
 
 class RRTPlanner {
 	public:
@@ -379,17 +385,23 @@ class RRTPlanner {
 			epsilon(epsilon), map(map), x_size(x_size), y_size(y_size), start(start), goal(goal), numofDOFs(numofDOFs) {}
 
 		Node* nearestNeighbor(const Config& q, bool from_start = true);
+        Node* nearestNeighborStar(const Config& q);
+        std::vector<Node*> nearbyNodes(const Config& qNew, double radius);
 		bool newConfig(const Node* qNear, const Config& q, Config& qNew);
 		void addVertex(const Config& qNew, bool from_start = true);
 		void addEdge(Node* parent, Node* child);
+        void addEdgeStar(Node* parent_node, Node* child_node);
         pair<bool,Node*> extendRRT(const Config& q, bool from_start = true);
+        Node* extendRRTStar(const Config& q);
 		Node* buildRRT(int K);
 		void extractPath(Node* goalNode, double ***plan, int *pathLength);
         void extractPathConnect(Node* startConnectNode, Node* goalConnectNode, double ***plan, int *planlength);
 		bool checkDist(const Config& q1, const Config& q2);
         pair<Node*, Node*> buildRRTConnect(int K);
         Node* connect(const Config& q, bool from_start);
+        Node* buildRRTStar(int K);
 };
+
 
 // returns nearest neighboring node
 Node* RRTPlanner::nearestNeighbor(const Config& q, bool from_start) {
@@ -413,7 +425,7 @@ Node* RRTPlanner::nearestNeighbor(const Config& q, bool from_start) {
     return nearest;
 }
 
-// move towards q (return true if moved, false if trapped or there alread)
+// move towards q (return true if moved, false if trapped or there already)
 bool RRTPlanner::newConfig(const Node* qNear, const Config& q, Config& qNew) {
     double dist = 0.0;
     for (size_t i = 0; i < numofDOFs; i++) {
@@ -457,7 +469,6 @@ void RRTPlanner::addVertex(const Config& qNew, bool from_start) {
     nodes.push_back(new_node);
 }
 
-
 void RRTPlanner::addEdge(Node* parent_node, Node* child_node) {
     child_node->parent = parent_node;
 }
@@ -477,27 +488,10 @@ pair<bool,Node*> RRTPlanner::extendRRT(const Config& q, bool from_start) {
     return make_pair(false,qNear); // trapped
 }
 
-// connect towards q until it's reached or trapped
-Node* RRTPlanner::connect(const Config& q, bool from_start){
-    while(true){
-        auto result = extendRRT(q, from_start);
-        if (result.first){
-            if (checkDist(result.second->config, q)){
-                cout << "reached" << endl;
-                return result.second; // reached
-            }
-            cout << "advanced" << endl;
-        } else {
-            cout << "trapped" << endl;
-            return nullptr; // trapped
-        }
-    }
-}
-
 bool RRTPlanner::checkDist(const Config& q1, const Config& q2){
     double sum = 0.0;
 
-    // Compute squared Euclidean distance
+    // euclidean dist
     for (size_t i = 0; i < numofDOFs; i++) {
         sum += (q1.values[i] - q2.values[i]) * (q1.values[i] - q2.values[i]);
     }
@@ -505,13 +499,11 @@ bool RRTPlanner::checkDist(const Config& q1, const Config& q2){
 
     cout << "distance: " << distance << endl;
 
-    // Check if distance is within threshold
+    // check if dist within thresh
     return distance <= 1e-3;
 }
 
 Node* RRTPlanner::buildRRT(int K) {
-    // nodes.clear();
-
 	Config qInit(numofDOFs);
 	qInit.values = start;
     addVertex(qInit);
@@ -521,7 +513,7 @@ Node* RRTPlanner::buildRRT(int K) {
 
     for (int k = 0; k < K; k++) {
         Config qRand(numofDOFs);
-        double biasProbability = static_cast<double>(rand()) / RAND_MAX; // Random value between 0 and 1
+        double biasProbability = static_cast<double>(rand()) / RAND_MAX; // random value between 0 and 1
 
         // 10% bias towards the goal
         if (biasProbability <= 0.1) { // todo: tune
@@ -529,66 +521,20 @@ Node* RRTPlanner::buildRRT(int K) {
         } else {
             // Generate random configuration
             for (size_t i = 0; i < numofDOFs; i++) {
-                qRand.values[i] = ((double) rand() / RAND_MAX) * 2 * M_PI; // Random value between 0 and 2pi
+                qRand.values[i] = ((double) rand() / RAND_MAX) * 2 * M_PI; // random value between 0 and 2pi
             }
         }
         auto result = extendRRT(qRand);
 
-        if (checkDist(result.second->config, qGoal)) { // We have reached the goal
+        if (checkDist(result.second->config, qGoal)) { // reached the goal
             return result.second;
         }
     }
-    return nullptr; // Could not find a path after K iterations
+    return nullptr; // could not find a path after K iterations
 }
-
-
-// buildRRTConnect method
-pair<Node*, Node*> RRTPlanner::buildRRTConnect(int K) {
-    
-    bool from_start = true;
-    Config qInit(numofDOFs);
-    qInit.values = start;
-    addVertex(qInit, true);  // Add initial vertex to the start tree
-
-    Config qGoal(numofDOFs);
-    qGoal.values = goal;
-    addVertex(qGoal, false); // Add goal vertex to the goal tree
-
-    for (int k = 0; k < K; k++) {
-
-        // get random config
-        Config qRand(numofDOFs);
-        double biasProbability = static_cast<double>(rand()) / RAND_MAX; // Random value between 0 and 1
-        if (biasProbability <= 0.1) { // 10% bias towards the goal or start
-            qRand = from_start ? qGoal : qInit;
-        } else {
-            for (size_t i = 0; i < numofDOFs; i++) {
-                qRand.values[i] = ((double) rand() / RAND_MAX) * 2 * M_PI;
-            }
-        }
-
-        // extend from one side
-        Node* resultNode = extendRRT(qRand, from_start).second;
-        
-        // connect from other side
-        // Config qConnect = result ? result->config : qRand;
-        Node* connectNode = connect(resultNode->config, !from_start);
-        if (connectNode){ // both sides reached each other
-            // addEdge(result, connectNode);
-            auto pathEnds = from_start ? make_pair(resultNode,connectNode) : make_pair(connectNode,resultNode);
-            return pathEnds; // returning connection node
-        }
-
-        // swap sides
-        from_start = !from_start;
-    }
-
-    return make_pair(nullptr, nullptr);
-}
-
 
 void RRTPlanner::extractPath(Node* result, double ***plan, int *planlength) {
-    // Find path length by backtracking from the goal
+    // find path length by backtracking from the goal
     int len = 0;
     Node* current = result;
     while (current != nullptr) {
@@ -608,48 +554,6 @@ void RRTPlanner::extractPath(Node* result, double ***plan, int *planlength) {
     }
     *planlength = len;
 }
-
-void RRTPlanner::extractPathConnect(Node* startConnectNode, Node* goalConnectNode, double ***plan, int *planlength) {
-    vector<Node*> path1, path2;
-
-    Node* current = startConnectNode;
-    // Extract the path from the meeting point to the start
-    while (current != nullptr) {
-        path1.push_back(current);
-        current = current->parent;
-    }
-
-    current = goalConnectNode;
-    // Extract the path from the meeting point to the goal
-    while (current != nullptr) {
-        path2.push_back(current);
-        current = current->parent;
-    }
-
-    // Combine both paths
-    *planlength = path1.size() + path2.size();
-    *plan = (double**) malloc(*planlength * sizeof(double*));
-
-    int index = 0;
-    // Add path1 in reverse (from start to meeting point)
-    for (int i = path1.size() - 1; i >= 0; i--) {
-        (*plan)[index] = (double*) malloc(numofDOFs * sizeof(double));
-        for (int j = 0; j < numofDOFs; j++) {
-            (*plan)[index][j] = path1[i]->config.values[j];
-        }
-        index++;
-    }
-
-    // Add path2 as is (from meeting point to goal)
-    for (Node* node : path2) {
-        (*plan)[index] = (double*) malloc(numofDOFs * sizeof(double));
-        for (int j = 0; j < numofDOFs; j++) {
-            (*plan)[index][j] = node->config.values[j];
-        }
-        index++;
-    }
-}
-
 
 static void plannerRRT(
     double *map,
@@ -684,6 +588,106 @@ static void plannerRRT(
 //                                                                                                                   //
 //*******************************************************************************************************************//
 
+// connect towards q until it's reached or trapped
+Node* RRTPlanner::connect(const Config& q, bool from_start){
+    while(true){
+        auto result = extendRRT(q, from_start);
+        if (result.first){
+            if (checkDist(result.second->config, q)){
+                cout << "reached" << endl;
+                return result.second; // reached
+            }
+            cout << "advanced" << endl;
+        } else {
+            cout << "trapped" << endl;
+            return nullptr; // trapped
+        }
+    }
+}
+
+void RRTPlanner::extractPathConnect(Node* startConnectNode, Node* goalConnectNode, double ***plan, int *planlength) {
+    vector<Node*> path1, path2;
+
+    Node* current = startConnectNode;
+    // extract path from the meeting point to the start
+    while (current != nullptr) {
+        path1.push_back(current);
+        current = current->parent;
+    }
+
+    current = goalConnectNode;
+    // extract path from the meeting point to the goal
+    while (current != nullptr) {
+        path2.push_back(current);
+        current = current->parent;
+    }
+
+    // combine both paths
+    *planlength = path1.size() + path2.size();
+    *plan = (double**) malloc(*planlength * sizeof(double*));
+
+    int index = 0;
+    // add path1 in reverse (from start to meeting point)
+    for (int i = path1.size() - 1; i >= 0; i--) {
+        (*plan)[index] = (double*) malloc(numofDOFs * sizeof(double));
+        for (int j = 0; j < numofDOFs; j++) {
+            (*plan)[index][j] = path1[i]->config.values[j];
+        }
+        index++;
+    }
+
+    // add path2 (from meeting point to goal)
+    for (Node* node : path2) {
+        (*plan)[index] = (double*) malloc(numofDOFs * sizeof(double));
+        for (int j = 0; j < numofDOFs; j++) {
+            (*plan)[index][j] = node->config.values[j];
+        }
+        index++;
+    }
+}
+
+// buildRRTConnect method
+pair<Node*, Node*> RRTPlanner::buildRRTConnect(int K) {
+    
+    bool from_start = true;
+    Config qInit(numofDOFs);
+    qInit.values = start;
+    addVertex(qInit, true);  // add initial vertex to the start tree
+
+    Config qGoal(numofDOFs);
+    qGoal.values = goal;
+    addVertex(qGoal, false); // add goal vertex to the goal tree
+
+    for (int k = 0; k < K; k++) {
+
+        // get random config
+        Config qRand(numofDOFs);
+        double biasProbability = static_cast<double>(rand()) / RAND_MAX; // random value between 0 and 1
+        if (biasProbability <= 0.1) { // 10% bias towards the goal or start
+            qRand = from_start ? qGoal : qInit;
+        } else {
+            for (size_t i = 0; i < numofDOFs; i++) {
+                qRand.values[i] = ((double) rand() / RAND_MAX) * 2 * M_PI;
+            }
+        }
+
+        // extend from one side
+        Node* resultNode = extendRRT(qRand, from_start).second;
+        
+        // connect from other side
+        Node* connectNode = connect(resultNode->config, !from_start);
+        if (connectNode){ // both sides reached each other
+            auto pathEnds = from_start ? make_pair(resultNode,connectNode) : make_pair(connectNode,resultNode);
+            return pathEnds; // returning connection node
+        }
+
+        // swap sides
+        from_start = !from_start;
+    }
+
+    return make_pair(nullptr, nullptr);
+}
+
 static void plannerRRTConnect(
     double *map,
     int x_size,
@@ -717,6 +721,121 @@ static void plannerRRTConnect(
 //                                                                                                                   //
 //*******************************************************************************************************************//
 
+// using euclidean dist for cost
+double getCost(const Config& q1, const Config& q2) {
+    double sum = 0.0;
+    for (size_t i = 0; i < q1.values.size(); i++) {
+        sum += (q1.values[i] - q2.values[i]) * (q1.values[i] - q2.values[i]);
+    }
+    return sqrt(sum);
+}
+
+// function to find the nearest neighbor based on cost
+Node* RRTPlanner::nearestNeighborStar(const Config& q) {
+    Node* nearest = nullptr;
+    double minCost = std::numeric_limits<double>::max(); // using cost
+
+    for (Node* node : start_nodes) {
+        double cost = node->cost;  // cost
+        if (cost < minCost) {
+            minCost = cost;
+            nearest = node;
+        }
+    }
+    return nearest;
+}
+
+// function to find all nearby nodes within radius
+std::vector<Node*> RRTPlanner::nearbyNodes(const Config& qNew, double radius) {
+    std::vector<Node*> nearby;
+    for (Node* node : start_nodes) {
+        double dist = 0.0;
+        for (size_t i = 0; i < numofDOFs; i++) {
+            dist += std::pow(node->config.values[i] - qNew.values[i], 2);
+        }
+        dist = std::sqrt(dist);
+        if (dist < radius) {
+            nearby.push_back(node);
+        }
+    }
+    return nearby;
+}
+
+void RRTPlanner::addEdgeStar(Node* parent_node, Node* child_node) {
+    child_node->parent = parent_node;
+    child_node->cost = parent_node->cost + getCost(child_node->config, parent_node->config); // update cost
+}
+
+Node* RRTPlanner::extendRRTStar(const Config& q) {
+    Node* qNear = nearestNeighbor(q);
+    Config qNew(numofDOFs);
+    if (newConfig(qNear, q, qNew)) {
+
+        // new part for RRT*
+        double minCost = qNear->cost + getCost(qNear->config, qNew);  
+        Node* minCostNode = qNear;
+
+        // check for nodes in neighborhood
+        auto nearby = nearbyNodes(qNew, 10);  // todo: tune
+        for (Node* neighbor : nearby) {
+            double potentialCost = neighbor->cost + getCost(neighbor->config, qNew);
+            if (potentialCost < minCost) {
+                minCost = potentialCost;
+                minCostNode = neighbor;
+            }
+        }
+        
+        addVertex(qNew);
+        Node* qNewNode = start_nodes.back();
+        qNewNode->cost = minCost;  
+        addEdgeStar(minCostNode, qNewNode);  // set parent to the minCostNode
+        
+        // rewire the tree
+        for (Node* neighbor : nearby) {
+            double potentialCost = qNewNode->cost + getCost(qNewNode->config, neighbor->config);
+            if (potentialCost < neighbor->cost) {
+                neighbor->parent = qNewNode;
+                neighbor->cost = potentialCost;
+            }
+        }
+        
+        return qNewNode;
+    }
+    return nullptr;
+}
+
+Node* RRTPlanner::buildRRTStar(int K) {
+    // nodes.clear();
+
+	Config qInit(numofDOFs);
+	qInit.values = start;
+    addVertex(qInit);
+
+	Config qGoal(numofDOFs);
+	qGoal.values = goal;
+
+    for (int k = 0; k < K; k++) {
+        Config qRand(numofDOFs);
+        double biasProbability = static_cast<double>(rand()) / RAND_MAX; // random value between 0 and 1
+
+        // 10% bias towards the goal
+        if (biasProbability <= 0.1) { // todo: tune
+            qRand = qGoal;
+        } else {
+            // renerate random configuration
+            for (size_t i = 0; i < numofDOFs; i++) {
+                qRand.values[i] = ((double) rand() / RAND_MAX) * 2 * M_PI; // random value between 0 and 2pi
+            }
+        }
+        auto result = extendRRTStar(qRand);
+
+        if (result && checkDist(result->config, qGoal)) { // reached the goal
+            return result;
+        }
+    }
+    return nullptr; // could not find a path after K iterations
+}
+
 static void plannerRRTStar(
     double *map,
     int x_size,
@@ -733,7 +852,18 @@ static void plannerRRTStar(
 
 	RRTPlanner rrt(epsilon,map,x_size,y_size,start,goal,numofDOFs);
 
+
+	Node* result = rrt.buildRRTStar(100000);
+	if (result) {
+        rrt.extractPath(result, plan, planlength);
+	}
+    else{
+        cout << "No Goal Found" << endl;
+    }
+    
+    return;
 }
+
 
 //*******************************************************************************************************************//
 //                                                                                                                   //
