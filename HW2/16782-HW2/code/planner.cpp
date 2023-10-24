@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <queue>
+#include <chrono>
 
 #include <limits>
 #include <cmath>
@@ -353,6 +354,36 @@ static void planner(
 //                                                                                                                   //
 //*******************************************************************************************************************//
 
+// average distance between configurations in plan
+// double getPlanQuality(double*** plan, int* planlength, int numofDOFs) {
+//     double total_dist = 0;
+//     for (int i = 0; i < *planlength - 1; i++) {
+//         double* current_config = (*plan)[i];
+//         double* next_config = (*plan)[i+1];
+//         double current_dist = 0;
+//         for (int j = 0; j < numofDOFs; j++) {
+//             current_dist += pow(current_config[j] - next_config[j], 2);
+//         }
+//         total_dist += sqrt(current_dist);
+//     }
+//     return total_dist/ (*planlength - 1);
+// }
+
+double getPlanQuality(double*** plan, int* planlength, int numofDOFs) {
+    double cost = 0;
+    for (int i = 0; i < *planlength - 1; i++) {
+        double* current_config = (*plan)[i];
+        double* next_config = (*plan)[i+1];
+        double diff = 0;
+        for (int j = 0; j < numofDOFs; j++) {
+            diff = abs(current_config[j] - next_config[j]);
+		    diff = min(diff, 2*M_PI-diff);
+        }
+        cost += diff;
+    }
+    return cost;
+}
+
 // represents a joint angle configuration
 struct Config{
 	std::vector<double> values;
@@ -379,7 +410,6 @@ class RRTPlanner {
     	vector<double> start;
     	vector<double> goal;
     	int numofDOFs;
-        // double distance_thresh;
 
 		RRTPlanner(double epsilon, double* map, int x_size, int y_size, vector<double> start, vector<double> goal, int numofDOFs):
 			epsilon(epsilon), map(map), x_size(x_size), y_size(y_size), start(start), goal(goal), numofDOFs(numofDOFs) {}
@@ -413,9 +443,9 @@ Node* RRTPlanner::nearestNeighbor(const Config& q, bool from_start) {
     for (Node* node : nodes) {
         double dist = 0.0;
         for (size_t i = 0; i < numofDOFs; i++) {
-            dist += std::pow(node->config.values[i] - q.values[i], 2);
+            dist += pow(node->config.values[i] - q.values[i], 2);
         }
-        dist = std::sqrt(dist);
+        dist = sqrt(dist);
 
         if (dist < minDist) {
             minDist = dist;
@@ -497,7 +527,7 @@ bool RRTPlanner::checkDist(const Config& q1, const Config& q2){
     }
     double distance = sqrt(sum);
 
-    cout << "distance: " << distance << endl;
+    // cout << "distance: " << distance << endl;
 
     // check if dist within thresh
     return distance <= 1e-3;
@@ -516,7 +546,7 @@ Node* RRTPlanner::buildRRT(int K) {
         double biasProbability = static_cast<double>(rand()) / RAND_MAX; // random value between 0 and 1
 
         // 10% bias towards the goal
-        if (biasProbability <= 0.1) { // todo: tune
+        if (biasProbability <= 0.1) {
             qRand = qGoal;
         } else {
             // Generate random configuration
@@ -565,20 +595,44 @@ static void plannerRRT(
     double ***plan,
     int *planlength)
 {
+    // start clock
+    auto start_time = chrono::high_resolution_clock::now();
+
+    // initialize values
 	double epsilon = 0.5; // todo: tune
 	vector<double> start(armstart_anglesV_rad, armstart_anglesV_rad+numofDOFs);
 	vector<double> goal(armgoal_anglesV_rad, armgoal_anglesV_rad + numofDOFs);
-
 	RRTPlanner rrt(epsilon,map,x_size,y_size,start,goal,numofDOFs);
 
-	Node* result = rrt.buildRRT(100000);
+    // plan
+    Node* result = rrt.buildRRT(100000);
+
+    // planning time
+    auto plan_end = chrono::high_resolution_clock::now();
+    auto planning_time = chrono::duration_cast<chrono::milliseconds>(plan_end - start_time);
+
+    // extract path
 	if (result) {
         rrt.extractPath(result, plan, planlength);
 	}
     else{
         cout << "No Goal Found" << endl;
     }
-    
+
+    // full solution time
+    auto end_time = chrono::high_resolution_clock::now();
+    auto total_time = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
+
+    // planner metrics
+    string under_five = (total_time.count() < 5000) ? "Yes" : "No";
+    double plan_quality = getPlanQuality(plan, planlength, numofDOFs);
+    cout << "Algorithm: RRT" << endl;
+    cout << "Degrees of Freedom: " << numofDOFs << endl;
+    cout << "Planning Time: " << planning_time.count() << " milliseconds" << endl;
+    cout << "Generated Solution in Under Five Seconds: " << under_five << endl;
+    cout << "Nodes Generated: " << rrt.start_nodes.size() + rrt.goal_nodes.size() << endl;
+    cout << "Path Quality: " << plan_quality << endl;
+
     return;
 }
 
@@ -594,12 +648,12 @@ Node* RRTPlanner::connect(const Config& q, bool from_start){
         auto result = extendRRT(q, from_start);
         if (result.first){
             if (checkDist(result.second->config, q)){
-                cout << "reached" << endl;
+                // cout << "reached" << endl;
                 return result.second; // reached
             }
-            cout << "advanced" << endl;
+            // cout << "advanced" << endl;
         } else {
-            cout << "trapped" << endl;
+            // cout << "trapped" << endl;
             return nullptr; // trapped
         }
     }
@@ -698,19 +752,43 @@ static void plannerRRTConnect(
     double ***plan,
     int *planlength)
 {
-	double epsilon = 0.1; // todo: tune
+    // start clock
+    auto start_time = chrono::high_resolution_clock::now();
+
+    // initialize values
+	double epsilon = 0.5; // todo: tune
 	vector<double> start(armstart_anglesV_rad, armstart_anglesV_rad+numofDOFs);
 	vector<double> goal(armgoal_anglesV_rad, armgoal_anglesV_rad + numofDOFs);
-
 	RRTPlanner rrt(epsilon,map,x_size,y_size,start,goal,numofDOFs);
 
+    // plan
 	auto result = rrt.buildRRTConnect(100000);
+
+    // planning time
+    auto plan_end = chrono::high_resolution_clock::now();
+    auto planning_time = chrono::duration_cast<chrono::milliseconds>(plan_end - start_time);
+
+    // extract path
 	if (result.first && result.second) {
         rrt.extractPathConnect(result.first, result.second, plan, planlength);
 	}
     else{
         cout << "No Goal Found" << endl;
     }
+
+    // full solution time
+    auto end_time = chrono::high_resolution_clock::now();
+    auto total_time = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
+
+    // planner metrics
+    string under_five = (total_time.count() < 5000) ? "Yes" : "No";
+    double plan_quality = getPlanQuality(plan, planlength, numofDOFs);
+    cout << "Algorithm: RRT Connect" << endl;
+    cout << "Degrees of Freedom: " << numofDOFs << endl;
+    cout << "Planning Time: " << planning_time.count() << " milliseconds" << endl;
+    cout << "Generated Solution in Under Five Seconds: " << under_five << endl;
+    cout << "Nodes Generated: " << rrt.start_nodes.size() + rrt.goal_nodes.size() << endl;
+    cout << "Path Quality: " << plan_quality << endl;
     
     return;
 }
@@ -819,7 +897,7 @@ Node* RRTPlanner::buildRRTStar(int K) {
         double biasProbability = static_cast<double>(rand()) / RAND_MAX; // random value between 0 and 1
 
         // 10% bias towards the goal
-        if (biasProbability <= 0.1) { // todo: tune
+        if (biasProbability <= 0.1) {
             qRand = qGoal;
         } else {
             // renerate random configuration
@@ -846,20 +924,43 @@ static void plannerRRTStar(
     double ***plan,
     int *planlength)
 {
+    // start clock
+    auto start_time = chrono::high_resolution_clock::now();
+
+    // initialize values
 	double epsilon = 0.5; // todo: tune
 	vector<double> start(armstart_anglesV_rad, armstart_anglesV_rad+numofDOFs);
 	vector<double> goal(armgoal_anglesV_rad, armgoal_anglesV_rad + numofDOFs);
-
 	RRTPlanner rrt(epsilon,map,x_size,y_size,start,goal,numofDOFs);
 
-
+    // plan
 	Node* result = rrt.buildRRTStar(100000);
+
+    // planning time
+    auto plan_end = chrono::high_resolution_clock::now();
+    auto planning_time = chrono::duration_cast<chrono::milliseconds>(plan_end - start_time);
+
+    // extract path
 	if (result) {
         rrt.extractPath(result, plan, planlength);
 	}
     else{
         cout << "No Goal Found" << endl;
     }
+
+    // full solution time
+    auto end_time = chrono::high_resolution_clock::now();
+    auto total_time = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
+
+    // planner metrics
+    string under_five = (total_time.count() < 5000) ? "Yes" : "No";
+    double plan_quality = getPlanQuality(plan, planlength, numofDOFs);
+    cout << "Algorithm: RRT*" << endl;
+    cout << "Degrees of Freedom: " << numofDOFs << endl;
+    cout << "Planning Time: " << planning_time.count() << " milliseconds" << endl;
+    cout << "Generated Solution in Under Five Seconds: " << under_five << endl;
+    cout << "Nodes Generated: " << rrt.start_nodes.size() + rrt.goal_nodes.size() << endl;
+    cout << "Path Quality: " << plan_quality << endl;
     
     return;
 }
@@ -937,7 +1038,10 @@ vector<double*> getNeighbors(double neighborhood_size, double* vertex, unordered
 // add edge
 static void add_edge(unordered_map<int, unordered_set<int>>& edges, int alpha_i, int q_i){
 	// if alpha_i in edges, add edge to q_i
-    if (edges.find(alpha_i) != edges.end()) {
+    if (alpha_i == q_i){
+        return;
+    }
+    else if (edges.find(alpha_i) != edges.end()) {
         edges[alpha_i].insert(q_i);
     }
 	// add alpha_i to edges and add edge to q_i
@@ -945,10 +1049,19 @@ static void add_edge(unordered_map<int, unordered_set<int>>& edges, int alpha_i,
         std::unordered_set<int> q_set = {q_i};
         edges.insert(make_pair(alpha_i, q_set));
     }
+
+    // add reverse order as well
+    if (edges.find(q_i) != edges.end()) {
+        edges[q_i].insert(alpha_i);
+    }
+	else {
+        std::unordered_set<int> q_set = {alpha_i};
+        edges.insert(make_pair(q_i, q_set));
+    }
 }
 
 // find closest node, add to nodes list, and add edge
-void connectClosest(double* vertex, unordered_map<int, double*>& nodes, int numofDOFs, unordered_map<int, unordered_set<int>>& edges, int index){
+void connectClosest(double* vertex, unordered_map<int, double*>& nodes, int numofDOFs, unordered_map<int, unordered_set<int>>& edges, int index, bool start){
     int i;
     double min_dist = std::numeric_limits<double>::max();
     for (const auto& n : nodes) {
@@ -958,7 +1071,7 @@ void connectClosest(double* vertex, unordered_map<int, double*>& nodes, int numo
             i = n.first;
         }
     }
-    if (index==-1){
+    if (start){
         add_edge(edges,index,i);
     }
     else{
@@ -1050,12 +1163,18 @@ static void plannerPRM(
     double ***plan,
     int *planlength)
 {
-	int steps = 50; // todo: tune
-	double neighborhood_size = (x_size*y_size)/1000; //todo: tune
+
+    // start clock
+    auto start_time = chrono::high_resolution_clock::now();
+
+    // initialize values
+	int steps = 20; // todo: tune
+	double neighborhood_size = 20; //todo: tune
 	unordered_map<int, unordered_set<int>> edges;
 	unordered_map<int, double*> nodes;
 	int i = 0;
 
+    // build graph
 	while (i < 1000){
 
 		// get random vertex
@@ -1082,19 +1201,17 @@ static void plannerPRM(
 	}
 
     // connect closest nodes to start and goal
-    int startIdx = -1;
-    int goalIdx = -2;
-    connectClosest(armstart_anglesV_rad, nodes, numofDOFs, edges, startIdx);
-    connectClosest(armgoal_anglesV_rad, nodes, numofDOFs, edges, goalIdx);
-
-    // cout << nodes[-2][0] << endl;
-    // auto edge_set = edges[881];
-    // for (const auto& elem : edge_set) {
-    //     std::cout << elem << endl;
-    // }
+    int startIdx = i+1;
+    int goalIdx = i+2;
+    connectClosest(armstart_anglesV_rad, nodes, numofDOFs, edges, startIdx, true);
+    connectClosest(armgoal_anglesV_rad, nodes, numofDOFs, edges, goalIdx, false);
 
     // search graph using A*
     vector<int> pathIndices = searchGraph(startIdx, goalIdx, edges, nodes, numofDOFs);
+
+    // planning time
+    auto plan_end = chrono::high_resolution_clock::now();
+    auto planning_time = chrono::duration_cast<chrono::milliseconds>(plan_end - start_time);
 
     // populate plan
     if (!pathIndices.empty()) {
@@ -1109,6 +1226,19 @@ static void plannerPRM(
         cout << "Failed to find a path." << endl;
     }
 
+    // full solution time
+    auto end_time = chrono::high_resolution_clock::now();
+    auto total_time = chrono::duration_cast<chrono::milliseconds>(end_time - start_time);
+
+    // planner metrics
+    string under_five = (total_time.count() < 5000) ? "Yes" : "No";
+    double plan_quality = getPlanQuality(plan, planlength, numofDOFs);
+    cout << "Algorithm: PRM" << endl;
+    cout << "Degrees of Freedom: " << numofDOFs << endl;
+    cout << "Planning Time: " << planning_time.count() << " milliseconds" << endl;
+    cout << "Generated Solution in Under Five Seconds: " << under_five << endl;
+    cout << "Nodes Generated: " << nodes.size() << endl;
+    cout << "Path Quality: " << plan_quality << endl;
 }
 
 
@@ -1132,6 +1262,7 @@ static void plannerPRM(
 int main(int argc, char** argv) {
 	double* map;
 	int x_size, y_size;
+    srand(time(NULL));
 
 	tie(map, x_size, y_size) = loadMap(argv[1]);
 	const int numOfDOFs = std::stoi(argv[2]);
@@ -1139,6 +1270,28 @@ int main(int argc, char** argv) {
 	double* goalPos = doubleArrayFromString(argv[4]);
 	int whichPlanner = std::stoi(argv[5]);
 	string outputFile = argv[6];
+
+    // find a random valid start and goal position (only need this section for the write up)
+    // while(true){
+
+    //     for (size_t i = 0; i < numOfDOFs; i++) {
+    //         startPos[i] = ((double) rand() / RAND_MAX) * 2 * M_PI;
+    //         goalPos[i] = ((double) rand() / RAND_MAX) * 2 * M_PI;   
+    //     }
+
+    //     if( IsValidArmConfiguration(startPos, numOfDOFs, map, x_size, y_size) && IsValidArmConfiguration(goalPos, numOfDOFs, map, x_size, y_size) ){
+    //         break;
+    //     }
+    // }
+    // // cout << "start position: " << endl;
+    // for (size_t i = 0; i < numOfDOFs; i++) {
+    //     cout << startPos[i] << endl;
+    // }
+    // // cout << "goal position: " << endl;
+    // for (size_t i = 0; i < numOfDOFs; i++) {
+    //     cout << goalPos[i] << endl;
+    // }
+
 
 	if(!IsValidArmConfiguration(startPos, numOfDOFs, map, x_size, y_size)||
 			!IsValidArmConfiguration(goalPos, numOfDOFs, map, x_size, y_size)) {
