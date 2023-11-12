@@ -763,6 +763,8 @@ Env* create_env(char* filename)
 // struct to store state info
 struct State {
     unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> conditions;
+    string action_name;
+    list<string> action_arg_values;
 
     bool operator==(const State& other) const {
         return conditions == other.conditions && conditions == other.conditions;
@@ -798,16 +800,27 @@ struct compareSmaller {
     }
 };
 
+// # of goal conditions that are not satisfied
 int getHeuristic(const State& current, const State& goal){
-    // TODO
-    return 1;
+    int not_satisfied = 0;
+    auto currentConditions = current.conditions;
+    auto goalConditions = goal.conditions;
+
+    for (const auto& condition : goalConditions){
+        // check if condition is in currentConditions
+        if (currentConditions.find(condition) == currentConditions.end()){
+            not_satisfied++;
+        }
+    }
+
+    return not_satisfied;
 }
 
-//  Generate all permutations of symbols
+//  get permutations of symbols
 vector<vector<string>> generatePermutations(const vector<string>& symbols, int num_args) {
     vector<vector<string>> permutations;
     vector<int> indices(num_args);
-    iota(indices.begin(), indices.end(), 0); // Initialize indices to 0, 1, 2, ..., k-1
+    iota(indices.begin(), indices.end(), 0); // initialize indices to 0, 1, 2, ..., num_args-1
 
     do {
         vector<string> permutation;
@@ -820,8 +833,11 @@ vector<vector<string>> generatePermutations(const vector<string>& symbols, int n
     return permutations;
 }
 
-bool checkPreconditions(const State& current, const Action& action, const GroundedAction& grounded_action){
+GroundedAction makeGroundedAction(const Action& action, const vector<string>& symbol_perm){
+    // TODO
+}
 
+bool checkPreconditions(const State& current, const Action& action, const GroundedAction& grounded_action){
     auto preconditions = action.get_preconditions(); 
     auto arg_names = action.get_args(); // x,y
     auto arg_values = grounded_action.get_arg_values(); // A,B
@@ -829,17 +845,23 @@ bool checkPreconditions(const State& current, const Action& action, const Ground
     unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> grounded_preconditions;
     auto state_conditions = current.conditions;
 
-    for (const auto& state_conditions){
+    // TODO
+
+    for (const auto& cond : state_conditions){
         return false;
     }
     return true;
 }
 
-list<GroundedAction> astar(
+State getNextState(const State& current_state, const Action& action, const GroundedAction& gr_action){
+    // TODO
+}
+
+unordered_map<State, State, StateHasher> astar(
     State goal,
     State start,
     unordered_set<Action, ActionHasher, ActionComparator> actions,
-    unordered_set<string> symbols
+    unordered_set<string> symbols_set
     )
 {
     // initialize lists
@@ -847,11 +869,10 @@ list<GroundedAction> astar(
     unordered_set<State, StateHasher> closed_list;
     unordered_map<State, State, StateHasher> parent_list; // maps s'->s
     unordered_map<State, double, StateHasher> g_values;
-    list<GroundedAction> action_results;
 
     // initialize start conditions
     g_values[start] = 0;
-    open_list.push(make_pair(g_values[start] + getHeuristic(start, goal), start)); 
+    open_list.push(make_pair(g_values[start] + getHeuristic(start, goal), start));
     State s = start;
 
     // check that open list isn't empty
@@ -861,37 +882,62 @@ list<GroundedAction> astar(
         s = open_list.top().second;
         open_list.pop();
         closed_list.insert(s);
-
-        // get all potential s' values
-        State s_prime;
         
-        // for all actions
+        // for each action
         for (const auto& action : actions) {
             auto args = action.get_args();
+            vector<string> symbols(symbols_set.begin(), symbols_set.end());
+            // get the permutations of symbols
+            vector<vector<string>> symbol_permutations = generatePermutations(symbols, args.size());
 
-            // for all symbols
-            for (const auto& symbol : symbols){
-                // make an action with the symbol options
-                // GroundedAction current_action = GroundedAction();
+            // for each permutation
+            for (const auto& symbol_perm : symbol_permutations){
+                //make a grounded action from the action and symbols
+                GroundedAction gr_action = makeGroundedAction(action, symbol_perm);
+
                 // check if preconditions are satisfied
+                if (checkPreconditions(s, action, gr_action)){
 
-                // determine the new conditions -- make s'
+                    // determine the new conditions (make s')
+                    State s_prime = getNextState(s, action, gr_action);
 
-                // check that s' not in closed_list
-                if ( closed_list.count(s_prime) <= 0){
+                    // check that s' not in closed_list
+                    if ( closed_list.count(s_prime) <= 0){
 
-                    // if g(s') > g(s)
-                    if ( g_values.count(s_prime) <=0 || g_values[s_prime] > g_values[s] + 1 ){
-                        g_values[s_prime] = g_values[s] + 1; // g(s') = g(s) + c(s,s')
-                        parent_list[s_prime] = s;               // update parent list
-                        // action_results.push_back(current_action);  // add to action list
-                        open_list.push(make_pair(g_values[s_prime] + getHeuristic(s_prime, goal), s_prime)); // insert s into open list
+                        // if g(s') > g(s)
+                        if ( g_values.count(s_prime) <=0 || g_values[s_prime] > g_values[s] + 1 ){
+                            g_values[s_prime] = g_values[s] + 1;    // g(s') = g(s) + c(s,s')
+                            parent_list[s_prime] = s;                   // update parent list
+                            s_prime.action_name = gr_action.get_name(); // save action taken to get to s'
+                            s_prime.action_arg_values = gr_action.get_arg_values();
+                            open_list.push(make_pair(g_values[s_prime] + getHeuristic(s_prime, goal), s_prime)); // insert s into open list
+                        }
                     }
                 }
-            }
+            }    
         }
     }
-    return action_results;
+    return parent_list;
+}
+
+// backtrack to get the complete path
+list<GroundedAction> backtrack(const State& goal, const State& start, unordered_map<State, State, StateHasher> parent_list){
+
+    cout << "backtracking to compute path" << endl;
+
+    // make a list of actions
+    list<GroundedAction> actions;
+
+    State current = goal;
+
+    // reconstruct the path
+    while (current != start) {
+        GroundedAction ga = GroundedAction(current.action_name, current.action_arg_values);
+        actions.push_back(ga);
+        current = parent_list[current];
+    }
+
+    return actions;
 }
 
 list<GroundedAction> planner(Env* env)
@@ -903,10 +949,12 @@ list<GroundedAction> planner(Env* env)
     unordered_set<Action, ActionHasher, ActionComparator> actions = env->get_actions();
     unordered_set<string> symbols = env->get_symbols();
 
-    list<GroundedAction> action_results = astar(goal, start, actions, symbols);
-    return action_results;
+    unordered_map<State, State, StateHasher> parent_list = astar(goal, start, actions, symbols);
+    return backtrack(goal, start, parent_list);
 
-    // // Blocks World example (CHANGE THIS)
+    // return action_results;
+
+    // Blocks World example (CHANGE THIS)
     // cout << endl << "CREATING DEFAULT PLAN" << endl;
     // list<GroundedAction> actions;
     // actions.push_back(GroundedAction("MoveToTable", { "A", "B" }));
