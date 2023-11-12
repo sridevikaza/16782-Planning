@@ -6,9 +6,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/myprogram",
-            "args": ["map2.txt", "4", "0.855911,1.73271,4.68645,1.14953", "0.323881,1.54851,2.15645,4.92301", "3", "myOutput.txt"],  //20
-
-
+            "args": ["Blocks.txt"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],

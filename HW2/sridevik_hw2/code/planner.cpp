@@ -372,7 +372,7 @@ double getPlanQuality(double*** plan, int* planlength, int numofDOFs) {
 
 // represents a joint angle configuration
 struct Config{
-	std::vector<double> values;
+	vector<double> values;
 	Config(int numofDOFs) : values(numofDOFs, 0.0) {}
 };
 
@@ -387,8 +387,8 @@ struct Node {
 
 class RRTPlanner {
 	public:
-        std::vector<Node*> start_nodes;
-        std::vector<Node*> goal_nodes;
+        vector<Node*> start_nodes;
+        vector<Node*> goal_nodes;
 		double epsilon;
 	    double *map;
     	int x_size;
@@ -402,7 +402,7 @@ class RRTPlanner {
 
 		Node* nearestNeighbor(const Config& q, bool from_start = true);
         Node* nearestNeighborStar(const Config& q);
-        std::vector<Node*> nearbyNodes(const Config& qNew, double radius);
+        vector<Node*> nearbyNodes(const Config& qNew, double radius);
 		bool newConfig(const Node* qNear, const Config& q, Config& qNew);
 		void addVertex(const Config& qNew, bool from_start = true);
 		void addEdge(Node* parent, Node* child);
@@ -424,7 +424,7 @@ Node* RRTPlanner::nearestNeighbor(const Config& q, bool from_start) {
     vector<Node*>& nodes = from_start ? start_nodes : goal_nodes;
 
     Node* nearest = nullptr;
-    double minDist = std::numeric_limits<double>::max();
+    double minDist = numeric_limits<double>::max();
 
     for (Node* node : nodes) {
         double dist = 0.0;
@@ -449,7 +449,7 @@ bool RRTPlanner::newConfig(const Node* qNear, const Config& q, Config& qNew) {
     }
     dist = sqrt(dist);
 
-    double stepSize = std::min(epsilon, dist) / dist;  // scaling factor
+    double stepSize = min(epsilon, dist) / dist;  // scaling factor
     bool advancementMade = false;
 
     // interpolate from qNear towards q and check for collisions
@@ -796,7 +796,7 @@ double getCost(const Config& q1, const Config& q2) {
 // function to find the nearest neighbor based on cost
 Node* RRTPlanner::nearestNeighborStar(const Config& q) {
     Node* nearest = nullptr;
-    double minCost = std::numeric_limits<double>::max();
+    double minCost = numeric_limits<double>::max();
 
     for (Node* node : start_nodes) {
         double cost = node->cost;
@@ -809,14 +809,14 @@ Node* RRTPlanner::nearestNeighborStar(const Config& q) {
 }
 
 // function to find all nearby nodes within radius
-std::vector<Node*> RRTPlanner::nearbyNodes(const Config& qNew, double radius) {
-    std::vector<Node*> nearby;
+vector<Node*> RRTPlanner::nearbyNodes(const Config& qNew, double radius) {
+    vector<Node*> nearby;
     for (Node* node : start_nodes) {
         double dist = 0.0;
         for (size_t i = 0; i < numofDOFs; i++) {
-            dist += std::pow(node->config.values[i] - qNew.values[i], 2);
+            dist += pow(node->config.values[i] - qNew.values[i], 2);
         }
-        dist = std::sqrt(dist);
+        dist = sqrt(dist);
         if (dist < radius) {
             nearby.push_back(node);
         }
@@ -913,7 +913,7 @@ static void plannerRRTStar(
     auto start_time = chrono::high_resolution_clock::now();
 
     // initialize values
-	double epsilon = 0.5; // todo: tune
+	double epsilon = 0.5;
 	vector<double> start(armstart_anglesV_rad, armstart_anglesV_rad+numofDOFs);
 	vector<double> goal(armgoal_anglesV_rad, armgoal_anglesV_rad + numofDOFs);
 	RRTPlanner rrt(epsilon,map,x_size,y_size,start,goal,numofDOFs);
@@ -1032,7 +1032,7 @@ static void add_edge(unordered_map<int, unordered_set<int>>& edges, int alpha_i,
     }
 	// add alpha_i to edges and add edge to q_i
 	else {
-        std::unordered_set<int> q_set = {q_i};
+        unordered_set<int> q_set = {q_i};
         edges.insert(make_pair(alpha_i, q_set));
     }
 
@@ -1041,7 +1041,7 @@ static void add_edge(unordered_map<int, unordered_set<int>>& edges, int alpha_i,
         edges[q_i].insert(alpha_i);
     }
 	else {
-        std::unordered_set<int> q_set = {alpha_i};
+        unordered_set<int> q_set = {alpha_i};
         edges.insert(make_pair(q_i, q_set));
     }
 }
@@ -1049,7 +1049,7 @@ static void add_edge(unordered_map<int, unordered_set<int>>& edges, int alpha_i,
 // find closest node, add to nodes list, and add edge
 void connectClosest(double* vertex, unordered_map<int, double*>& nodes, int numofDOFs, unordered_map<int, unordered_set<int>>& edges, int index, bool start){
     int i;
-    double min_dist = std::numeric_limits<double>::max();
+    double min_dist = numeric_limits<double>::max();
     for (const auto& n : nodes) {
         double dist = getDistance(vertex, n.second, numofDOFs);
         if (dist <= min_dist) {
