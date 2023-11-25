@@ -12,6 +12,7 @@
 #include <vector>
 #include <string>
 #include <numeric>
+#include <iterator>
 
 #define SYMBOLS 0
 #define INITIAL 1
@@ -833,28 +834,78 @@ vector<vector<string>> generatePermutations(const vector<string>& symbols, int n
     return permutations;
 }
 
-GroundedAction makeGroundedAction(const Action& action, const vector<string>& symbol_perm){
-    // TODO
-}
+bool checkPreconditions(const State& current, const Action& action, vector<string> symbol_perm){
+    auto preconditions = action.get_preconditions();
+    auto action_args = action.get_args(); // x,y
 
-bool checkPreconditions(const State& current, const Action& action, const GroundedAction& grounded_action){
-    auto preconditions = action.get_preconditions(); 
-    auto arg_names = action.get_args(); // x,y
-    auto arg_values = grounded_action.get_arg_values(); // A,B
+    // for each cond in preconditions -> make grounded condition
+    for (const auto& cond : preconditions){
+        string predicate = cond.get_predicate();
+        bool truth = cond.get_truth();
+        list<string> cond_args = cond.get_args();
+        list<string> new_args;
+        // for each arg in cond args
+        for (const auto& cond_arg : cond_args){
+            auto it = std::find(action_args.begin(), action_args.end(), cond_arg);
+            // cond arg in action args
+            if (it != action_args.end()) {
+                int index = distance(action_args.begin(), it);
+                new_args.push_back(symbol_perm[index]);
+            }
+            // cond arg not in action args
+            else {
+                new_args.push_back(cond_arg);  
+            }
+        }
+        // make grounded condition
+        GroundedCondition gr_cond = GroundedCondition(predicate, new_args, truth);
 
-    unordered_set<GroundedCondition, GroundedConditionHasher, GroundedConditionComparator> grounded_preconditions;
-    auto state_conditions = current.conditions;
+        // check if gr_cond is in the current state
+        if (current.conditions.find(gr_cond) == current.conditions.end()) {
+            return false;
+        }
 
-    // TODO
-
-    for (const auto& cond : state_conditions){
-        return false;
     }
+    
     return true;
 }
 
-State getNextState(const State& current_state, const Action& action, const GroundedAction& gr_action){
-    // TODO
+// create the next state 
+State getNextState(const State& current, const Action& action, vector<string> symbol_perm, unordered_set<string> symbols_set){
+    State s_prime;
+    list<string> args_list(symbol_perm.begin(), symbol_perm.end());
+    s_prime.action_arg_values = args_list;
+    s_prime.action_name = action.get_name();
+    
+    auto new_conds = current.conditions;
+    
+    // for each effect_cond in effect_conds
+    for (const auto& effect_cond : action.get_effects()){
+        auto actual_truth = effect_cond.get_truth();
+        auto pred = effect_cond.get_predicate();
+        list<string> new_args;
+        int i = 0;
+        for (const auto& effect_arg : effect_cond.get_args()){
+            if(symbols_set.find(effect_arg) == symbols_set.end()){
+                new_args.push_back(effect_arg);
+            } else{
+                new_args.push_back(symbol_perm[i]);
+            }
+            i++;
+        }
+        GroundedCondition gr_cond = GroundedCondition(pred, new_args);
+        if(new_conds.find(gr_cond) == new_conds.end()){ //grounded condition in state
+            if (!actual_truth){
+                new_conds.erase(gr_cond);
+            }
+        }
+        else{
+            new_conds.insert(gr_cond);
+        }
+    }
+
+    s_prime.conditions = new_conds;
+    return s_prime;
 }
 
 unordered_map<State, State, StateHasher> astar(
@@ -864,6 +915,8 @@ unordered_map<State, State, StateHasher> astar(
     unordered_set<string> symbols_set
     )
 {
+    cout << "running A* search" << endl;
+    
     // initialize lists
     priority_queue<pair<double, State>, vector<pair<double, State>>, compareSmaller> open_list; // pair: f(s), s
     unordered_set<State, StateHasher> closed_list;
@@ -892,14 +945,13 @@ unordered_map<State, State, StateHasher> astar(
 
             // for each permutation
             for (const auto& symbol_perm : symbol_permutations){
-                //make a grounded action from the action and symbols
-                GroundedAction gr_action = makeGroundedAction(action, symbol_perm);
 
                 // check if preconditions are satisfied
-                if (checkPreconditions(s, action, gr_action)){
+                if (checkPreconditions(s, action, symbol_perm)){
+                    cout << "preconditions satisfied" << endl;
 
                     // determine the new conditions (make s')
-                    State s_prime = getNextState(s, action, gr_action);
+                    State s_prime = getNextState(s, action, symbol_perm, symbols_set);
 
                     // check that s' not in closed_list
                     if ( closed_list.count(s_prime) <= 0){
@@ -908,8 +960,6 @@ unordered_map<State, State, StateHasher> astar(
                         if ( g_values.count(s_prime) <=0 || g_values[s_prime] > g_values[s] + 1 ){
                             g_values[s_prime] = g_values[s] + 1;    // g(s') = g(s) + c(s,s')
                             parent_list[s_prime] = s;                   // update parent list
-                            s_prime.action_name = gr_action.get_name(); // save action taken to get to s'
-                            s_prime.action_arg_values = gr_action.get_arg_values();
                             open_list.push(make_pair(g_values[s_prime] + getHeuristic(s_prime, goal), s_prime)); // insert s into open list
                         }
                     }
