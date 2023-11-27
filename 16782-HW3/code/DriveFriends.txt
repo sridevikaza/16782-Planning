@@ -1,0 +1,12 @@
+Symbols: F1, F2, F3, F4, You, Car, S1, S2, S3, S4, Home
+Initial conditions: Person(F1), Person(F2), Person(F3), Person(F4), Person(You), School(S1), School(S2), School(S3), School(S4), InCar(You), At(F1,S1), At(F2,S2), At(F3,S3), At(F4,S4)
+Goal conditions: At(F1,Home), At(F2,Home), At(F3,Home), At(F4,Home), At(You,Home), At(Car,Home)
+
+Actions:
+        PickUpFriend(a,b)
+        Preconditions: Person(a), School(b), At(a,b)
+        Effects: InCar(a), !At(a,b)
+
+        GoHome(a, b, c, d)
+        Preconditions: InCar(a), InCar(b), InCar(c), InCar(d), InCar(You)
+        Effects: At(a,Home), At(b,Home), At(c,Home), At(d,Home), At(You,Home), At(Car,Home), !InCar(a), !InCar(b), !InCar(c), !InCar(d), !InCar(You)

@@ -13,6 +13,7 @@
 #include <string>
 #include <numeric>
 #include <iterator>
+#include <chrono>
 
 #define SYMBOLS 0
 #define INITIAL 1
@@ -780,14 +781,14 @@ struct StateHasher {
     size_t operator()(const State& state) const {
         size_t combined_hash = 0;
         for (const auto& condition : state.conditions) {
-            // Rotate the current combined hash to avoid collision patterns
+            // rotate the current combined hash to avoid collision patterns
             combined_hash = (combined_hash << 1) | (combined_hash >> (sizeof(size_t) * 8 - 1));
             
-            // Use the GroundedConditionHasher to hash each condition
+            // use the GroundedConditionHasher to hash each condition
             GroundedConditionHasher cond_hasher;
             size_t cond_hash = cond_hasher(condition);
 
-            // Combine the current hash with the hash of the condition
+            // combine the current hash with the hash of the condition
             combined_hash ^= cond_hash;
         }
         return combined_hash;
@@ -817,26 +818,38 @@ int getHeuristic(const State& current, const State& goal){
     return not_satisfied;
 }
 
-//  get permutations of symbols
-vector<vector<string>> generatePermutations(const vector<string>& symbols, int num_args) {
-    vector<vector<string>> permutations;
-    vector<int> indices(num_args);
-    iota(indices.begin(), indices.end(), 0); // initialize indices to 0, 1, 2, ..., num_args-1
+// get permutations of symbols
+void generatePermutations(vector<string>& symbols, int num_args, vector<string> current, vector<vector<string>>& result, vector<bool>& used) {
+    if (num_args == 0) {
+        result.push_back(current);
+        return;
+    }
 
-    do {
-        vector<string> permutation;
-        for (int i : indices) {
-            permutation.push_back(symbols[i]);
+    for (int i = 0; i < symbols.size(); ++i) {
+        if (!used[i]) {
+            vector<string> next_current = current;
+            next_current.push_back(symbols[i]);
+            used[i] = true;
+            generatePermutations(symbols, num_args - 1, next_current, result, used);
+            used[i] = false;  // backtrack to explore other possibilities
         }
-        permutations.push_back(permutation);
-    } while (next_permutation(indices.begin(), indices.end()));
-
-    return permutations;
+    }
 }
 
+vector<vector<string>> getAllPermutations(vector<string>& symbols, int num_args) {
+    vector<vector<string>> result;
+    vector<string> current;
+    vector<bool> used(symbols.size(), false);
+
+    generatePermutations(symbols, num_args, current, result, used);
+
+    return result;
+}
+
+// check if preconditions are satisfied
 bool checkPreconditions(const State& current, const Action& action, vector<string> symbol_perm){
     auto preconditions = action.get_preconditions();
-    auto action_args = action.get_args(); // x,y
+    auto action_args = action.get_args();
 
     // for each cond in preconditions -> make grounded condition
     for (const auto& cond : preconditions){
@@ -846,7 +859,7 @@ bool checkPreconditions(const State& current, const Action& action, vector<strin
         list<string> new_args;
         // for each arg in cond args
         for (const auto& cond_arg : cond_args){
-            auto it = std::find(action_args.begin(), action_args.end(), cond_arg);
+            auto it = find(action_args.begin(), action_args.end(), cond_arg);
             // cond arg in action args
             if (it != action_args.end()) {
                 int index = distance(action_args.begin(), it);
@@ -866,40 +879,52 @@ bool checkPreconditions(const State& current, const Action& action, vector<strin
         }
 
     }
-    
+
     return true;
 }
 
-// create the next state 
+// create the next state
 State getNextState(const State& current, const Action& action, vector<string> symbol_perm, unordered_set<string> symbols_set){
+    // get action args
+    auto action_args = action.get_args();
+
+    // make new state struct
     State s_prime;
     list<string> args_list(symbol_perm.begin(), symbol_perm.end());
     s_prime.action_arg_values = args_list;
     s_prime.action_name = action.get_name();
-    
     auto new_conds = current.conditions;
     
-    // for each effect_cond in effect_conds
+    // for each effect_cond in effect_conds -> make grounded cond
     for (const auto& effect_cond : action.get_effects()){
         auto actual_truth = effect_cond.get_truth();
         auto pred = effect_cond.get_predicate();
         list<string> new_args;
-        int i = 0;
         for (const auto& effect_arg : effect_cond.get_args()){
-            if(symbols_set.find(effect_arg) == symbols_set.end()){
+
+            // if the arg is a symbol already (not a variable)
+            if(symbols_set.find(effect_arg) != symbols_set.end()){
                 new_args.push_back(effect_arg);
             } else{
-                new_args.push_back(symbol_perm[i]);
+                // get the correspinding index from the action_args
+                auto it = find(action_args.begin(), action_args.end(), effect_arg);
+                if (it != action_args.end()) {
+                    // arg found, calculate its index
+                    int index = distance(action_args.begin(), it);
+                    new_args.push_back(symbol_perm[index]);
+                }
             }
-            i++;
         }
+
+        // make a grounded condition with the new_args
         GroundedCondition gr_cond = GroundedCondition(pred, new_args);
-        if(new_conds.find(gr_cond) == new_conds.end()){ //grounded condition in state
-            if (!actual_truth){
+
+        // check if the grounded condition is in the state conditions and accordingly delete or add
+        if(new_conds.find(gr_cond) != new_conds.end()){
+            if (actual_truth != gr_cond.get_truth()){
                 new_conds.erase(gr_cond);
             }
-        }
-        else{
+        } else{
             new_conds.insert(gr_cond);
         }
     }
@@ -908,15 +933,29 @@ State getNextState(const State& current, const Action& action, vector<string> sy
     return s_prime;
 }
 
-unordered_map<State, State, StateHasher> astar(
+// check if the goal conditions are a subset of the current conditions
+bool goalConditionsSatisfied(const State& s, const State& goal){
+    auto state_conds = s.conditions;
+    auto goal_conds = goal.conditions;
+
+    for (const auto& goal_cond : goal_conds){
+        if (state_conds.count(goal_cond)<=0){
+            return false;
+        }
+    }
+    return true;
+}
+
+pair<State, unordered_map<State, State, StateHasher>> astar(
     State goal,
     State start,
     unordered_set<Action, ActionHasher, ActionComparator> actions,
     unordered_set<string> symbols_set
     )
 {
-    cout << "running A* search" << endl;
-    
+    bool goal_found = false;
+    State final_goal;
+
     // initialize lists
     priority_queue<pair<double, State>, vector<pair<double, State>>, compareSmaller> open_list; // pair: f(s), s
     unordered_set<State, StateHasher> closed_list;
@@ -929,7 +968,7 @@ unordered_map<State, State, StateHasher> astar(
     State s = start;
 
     // check that open list isn't empty
-    while( !open_list.empty() && closed_list.count(goal)<=0 ) {
+    while( !open_list.empty() && !goal_found ) {
 
         // remove s with the smallest f from open_list and add to closed
         s = open_list.top().second;
@@ -938,17 +977,17 @@ unordered_map<State, State, StateHasher> astar(
         
         // for each action
         for (const auto& action : actions) {
+
+            // get all the permutations of symbols
             auto args = action.get_args();
             vector<string> symbols(symbols_set.begin(), symbols_set.end());
-            // get the permutations of symbols
-            vector<vector<string>> symbol_permutations = generatePermutations(symbols, args.size());
+            vector<vector<string>> symbol_permutations = getAllPermutations(symbols, args.size());
 
             // for each permutation
             for (const auto& symbol_perm : symbol_permutations){
 
                 // check if preconditions are satisfied
                 if (checkPreconditions(s, action, symbol_perm)){
-                    cout << "preconditions satisfied" << endl;
 
                     // determine the new conditions (make s')
                     State s_prime = getNextState(s, action, symbol_perm, symbols_set);
@@ -959,21 +998,31 @@ unordered_map<State, State, StateHasher> astar(
                         // if g(s') > g(s)
                         if ( g_values.count(s_prime) <=0 || g_values[s_prime] > g_values[s] + 1 ){
                             g_values[s_prime] = g_values[s] + 1;    // g(s') = g(s) + c(s,s')
-                            parent_list[s_prime] = s;                   // update parent list
+                            parent_list[s_prime] = s;               // update parent list
                             open_list.push(make_pair(g_values[s_prime] + getHeuristic(s_prime, goal), s_prime)); // insert s into open list
+                            
+                            // check if goal is found 
+                            if (goalConditionsSatisfied(s_prime, goal)){
+                                goal_found = true;
+                                final_goal = s_prime;
+                            }
                         }
                     }
                 }
-            }    
+            }
         }
     }
-    return parent_list;
+
+    if(!goal_found){
+        cout << "NO GOAL FOUND" << endl;
+    }
+    cout << "Number of States Expanded: " << closed_list.size() << endl;
+    return make_pair(final_goal, parent_list);
 }
 
-// backtrack to get the complete path
-list<GroundedAction> backtrack(const State& goal, const State& start, unordered_map<State, State, StateHasher> parent_list){
+// backtrack parent list to get the complete path
+list<GroundedAction> backtrack(const State& start, const State& goal, unordered_map<State, State, StateHasher> parent_list){
 
-    cout << "backtracking to compute path" << endl;
 
     // make a list of actions
     list<GroundedAction> actions;
@@ -981,17 +1030,21 @@ list<GroundedAction> backtrack(const State& goal, const State& start, unordered_
     State current = goal;
 
     // reconstruct the path
-    while (current != start) {
+    while (current.conditions != start.conditions) {
         GroundedAction ga = GroundedAction(current.action_name, current.action_arg_values);
         actions.push_back(ga);
         current = parent_list[current];
     }
 
+    actions.reverse();
     return actions;
 }
 
 list<GroundedAction> planner(Env* env)
 {
+    // start clock
+    auto start_time = chrono::high_resolution_clock::now();
+
     State start;
     State goal;
     start.conditions = env->get_initial_conditions();
@@ -999,19 +1052,15 @@ list<GroundedAction> planner(Env* env)
     unordered_set<Action, ActionHasher, ActionComparator> actions = env->get_actions();
     unordered_set<string> symbols = env->get_symbols();
 
-    unordered_map<State, State, StateHasher> parent_list = astar(goal, start, actions, symbols);
-    return backtrack(goal, start, parent_list);
+    auto result = astar(goal, start, actions, symbols);
+    auto plan = backtrack(start, result.first, result.second);
 
-    // return action_results;
+    // print metrics
+    auto plan_end = chrono::high_resolution_clock::now();
+    auto planning_time = chrono::duration_cast<chrono::milliseconds>(plan_end - start_time);
+    cout << "Planning Time: " << planning_time.count() << " milliseconds" << endl;
 
-    // Blocks World example (CHANGE THIS)
-    // cout << endl << "CREATING DEFAULT PLAN" << endl;
-    // list<GroundedAction> actions;
-    // actions.push_back(GroundedAction("MoveToTable", { "A", "B" }));
-    // actions.push_back(GroundedAction("Move", { "C", "Table", "A" }));
-    // actions.push_back(GroundedAction("Move", { "B", "Table", "C" }));
-
-    // return actions;
+    return plan;
 }
 
 int main(int argc, char* argv[])
